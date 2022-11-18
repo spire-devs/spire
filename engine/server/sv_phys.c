@@ -18,10 +18,12 @@ GNU General Public License for more details.
 #include "const.h"
 #include "library.h"
 #include "triangleapi.h"
-#include "gl_export.h"
+#include "ref_common.h"
 
 typedef int (*PHYSICAPI)( int, server_physics_api_t*, physics_interface_t* );
+#if !XASH_DEDICATED
 extern triangleapi_t gTriApi;
+#endif
 
 /*
 pushmove objects do not obey gravity, and do not interact with each other or trigger fields,
@@ -200,7 +202,7 @@ qboolean SV_RunThink( edict_t *ent )
 		thinktime = ent->v.nextthink;
 		if( thinktime <= 0.0f || thinktime > (sv.time + sv.frametime))
 			return true;
-		
+
 		if( thinktime < sv.time )
 			thinktime = sv.time;	// don't let things stay in the past.
 						// it is possible to start that way
@@ -371,7 +373,7 @@ float SV_RecursiveWaterLevel( vec3_t origin, float out, float in, int count )
 	vec3_t	point;
 	float	offset;
 
-	offset = ((out - in) * 0.5) + in;
+	offset = ((out - in) * 0.5f) + in;
 	if( ++count > 5 ) return offset;
 
 	VectorSet( point, origin[0], origin[1], origin[2] + offset );
@@ -407,7 +409,8 @@ float SV_Submerged( edict_t *ent )
 		svs.groupmask = ent->v.groupinfo;
 		if( SV_PointContents( point ) == CONTENTS_WATER )
 			return (ent->v.maxs[2] - ent->v.mins[2]);
-	case 2:	// intentionally fallthrough
+		// intentionally fallthrough
+	case 2:
 		bottom = SV_RecursiveWaterLevel( center, ent->v.absmax[2] - center[2], 0.0f, 0 );
 		return bottom - start;
 	}
@@ -520,7 +523,7 @@ int SV_ClipVelocity( vec3_t in, vec3_t normal, vec3_t out, float overbounce )
 	blocked = 0;
 	if( normal[2] > 0.0f ) blocked |= 1;	// floor
 	if( !normal[2] ) blocked |= 2;	// step
-	
+
 	backoff = DotProduct( in, normal ) * overbounce;
 
 	for( i = 0; i < 3; i++ )
@@ -583,14 +586,14 @@ int SV_FlyMove( edict_t *ent, float time, trace_t *steptrace )
 		allFraction += trace.fraction;
 
 		if( trace.allsolid )
-		{	
+		{
 			// entity is trapped in another solid
 			VectorClear( ent->v.velocity );
 			return 4;
 		}
 
 		if( trace.fraction > 0.0f )
-		{	
+		{
 			// actually covered some distance
 			VectorCopy( trace.endpos, ent->v.origin );
 			VectorCopy( ent->v.velocity, original_velocity );
@@ -607,8 +610,8 @@ int SV_FlyMove( edict_t *ent, float time, trace_t *steptrace )
 		{
 			blocked |= 1; // floor
 
-         			if( trace.ent->v.solid == SOLID_BSP || trace.ent->v.solid == SOLID_SLIDEBOX ||
-			trace.ent->v.movetype == MOVETYPE_PUSHSTEP || (trace.ent->v.flags & FL_CLIENT))
+			if( trace.ent->v.solid == SOLID_BSP || trace.ent->v.solid == SOLID_SLIDEBOX ||
+				trace.ent->v.movetype == MOVETYPE_PUSHSTEP || (trace.ent->v.flags & FL_CLIENT))
 			{
 				SetBits( ent->v.flags, FL_ONGROUND );
 				ent->v.groundentity = trace.ent;
@@ -733,7 +736,7 @@ void SV_AddHalfGravity( edict_t *ent, float timestep )
 	ent->v.velocity[2] -= ( 0.5f * ent_gravity * sv_gravity.value * timestep );
 	ent->v.velocity[2] += ( ent->v.basevelocity[2] * sv.frametime );
 	ent->v.basevelocity[2] = 0.0f;
-	
+
 	// bound velocity
 	SV_CheckVelocity( ent );
 }
@@ -864,7 +867,7 @@ allow entity to block pusher?
 static qboolean SV_CanBlock( edict_t *ent )
 {
 	if( ent->v.mins[0] == ent->v.maxs[0] )
-      		return false;
+		return false;
 
 	if( ent->v.solid == SOLID_NOT || ent->v.solid == SOLID_TRIGGER )
 	{
@@ -872,7 +875,7 @@ static qboolean SV_CanBlock( edict_t *ent )
 		ent->v.mins[0] = ent->v.mins[1] = 0;
 		VectorCopy( ent->v.mins, ent->v.maxs );
 		return false;
-          }
+	}
 
 	return true;
 }
@@ -889,7 +892,7 @@ static edict_t *SV_PushMove( edict_t *pusher, float movetime )
 	int		num_moved, oldsolid;
 	vec3_t		mins, maxs, lmove;
 	sv_pushed_t	*p, *pushed_p;
-	edict_t		*check;	
+	edict_t		*check;
 
 	if( svgame.globals->changelevel || VectorIsNull( pusher->v.velocity ))
 	{
@@ -911,7 +914,7 @@ static edict_t *SV_PushMove( edict_t *pusher, float movetime )
 	VectorCopy( pusher->v.origin, pushed_p->origin );
 	VectorCopy( pusher->v.angles, pushed_p->angles );
 	pushed_p++;
-	
+
 	// move the pusher to it's final position
 	SV_LinearMove( pusher, movetime, 0.0f );
 	SV_LinkEdict( pusher, false );
@@ -965,14 +968,14 @@ static edict_t *SV_PushMove( edict_t *pusher, float movetime )
 		VectorCopy( check->v.angles, pushed_p->angles );
 		pushed_p++;
 
-		// try moving the contacted entity 
+		// try moving the contacted entity
 		pusher->v.solid = SOLID_NOT;
 		SV_PushEntity( check, lmove, vec3_origin, &block, pusher->v.dmg );
 		pusher->v.solid = oldsolid;
 
 		// if it is still inside the pusher, block
 		if( SV_TestEntityPosition( check, NULL ) && block )
-		{	
+		{
 			if( !SV_CanBlock( check ))
 				continue;
 
@@ -988,7 +991,7 @@ static edict_t *SV_PushMove( edict_t *pusher, float movetime )
 				SV_LinkEdict( p->ent, (p->ent == check) ? true : false );
 			}
 			return check;
-		}	
+		}
 	}
 
 	return NULL;
@@ -1028,7 +1031,7 @@ static edict_t *SV_PushRotate( edict_t *pusher, float movetime )
 	VectorCopy( pusher->v.origin, pushed_p->origin );
 	VectorCopy( pusher->v.angles, pushed_p->angles );
 	pushed_p++;
-	
+
 	// move the pusher to it's final position
 	SV_AngularMove( pusher, movetime, pusher->v.friction );
 	SV_LinkEdict( pusher, false );
@@ -1096,9 +1099,9 @@ static edict_t *SV_PushRotate( edict_t *pusher, float movetime )
 			if( lmove[2] != 0.0f ) check->v.flags &= ~FL_ONGROUND;
 			if( lmove[2] < 0.0f && !pusher->v.dmg )
 				lmove[2] = 0.0f; // let's the free falling
-                    }
+		}
 
-		// try moving the contacted entity 
+		// try moving the contacted entity
 		pusher->v.solid = SOLID_NOT;
 		SV_PushEntity( check, lmove, amove, &block, pusher->v.dmg );
 		pusher->v.solid = oldsolid;
@@ -1109,7 +1112,7 @@ static edict_t *SV_PushRotate( edict_t *pusher, float movetime )
 
 		// if it is still inside the pusher, block
 		if( SV_TestEntityPosition( check, NULL ) && block )
-		{	
+		{
 			if( !SV_CanBlock( check ))
 				continue;
 
@@ -1180,7 +1183,7 @@ void SV_Physics_Pusher( edict_t *ent )
 				pBlocker = SV_PushRotate( ent, movetime );
 			}
 		}
-		else 
+		else
 		{
 			pBlocker = SV_PushMove( ent, movetime );
 		}
@@ -1243,7 +1246,7 @@ a glue two entities together
 void SV_Physics_Compound( edict_t *ent )
 {
 	edict_t	*parent;
-	
+
 	// regular thinking
 	if( !SV_RunThink( ent )) return;
 
@@ -1325,7 +1328,7 @@ void SV_Physics_Noclip( edict_t *ent )
 	// regular thinking
 	if( !SV_RunThink( ent )) return;
 
-	SV_CheckWater( ent );	
+	SV_CheckWater( ent );
 
 	VectorMA( ent->v.origin, sv.frametime, ent->v.velocity,  ent->v.origin );
 	VectorMA( ent->v.angles, sv.frametime, ent->v.avelocity, ent->v.angles );
@@ -1370,11 +1373,11 @@ void SV_CheckWaterTransition( edict_t *ent )
 	if( cont <= CONTENTS_WATER && cont > CONTENTS_TRANSLUCENT )
 	{
 		if( ent->v.watertype == CONTENTS_EMPTY )
-		{	
+		{
 			// just crossed into water
 			SV_StartSound( ent, CHAN_AUTO, "player/pl_wade1.wav", 1.0f, ATTN_NORM, 0, 100 );
-			ent->v.velocity[2] *= 0.5;
-		}		
+			ent->v.velocity[2] *= 0.5f;
+		}
 
 		ent->v.watertype = cont;
 		ent->v.waterlevel = 1;
@@ -1404,10 +1407,10 @@ void SV_CheckWaterTransition( edict_t *ent )
 	else
 	{
 		if( ent->v.watertype != CONTENTS_EMPTY )
-		{	
+		{
 			// just crossed into water
 			SV_StartSound( ent, CHAN_AUTO, "player/pl_wade2.wav", 1.0f, ATTN_NORM, 0, 100 );
-		}		
+		}
 		ent->v.watertype = CONTENTS_EMPTY;
 		ent->v.waterlevel = 0;
 	}
@@ -1469,7 +1472,7 @@ void SV_Physics_Toss( edict_t *ent )
 	case MOVETYPE_TOSS:
 	case MOVETYPE_BOUNCE:
 		SV_AngularMove( ent, sv.frametime, ent->v.friction );
-		break;         
+		break;
 	default:
 		SV_AngularMove( ent, sv.frametime, 0.0f );
 		break;
@@ -1514,7 +1517,7 @@ void SV_Physics_Toss( edict_t *ent )
 
 	// stop if on ground
 	if( trace.plane.normal[2] > 0.7f )
-	{		
+	{
 		float	vel;
 
 		VectorAdd( ent->v.velocity, ent->v.basevelocity, move );
@@ -1543,7 +1546,7 @@ void SV_Physics_Toss( edict_t *ent )
 			if( ent->free ) return;
 		}
 	}
-	
+
 	// check for in water
 	SV_CheckWaterTransition( ent );
 }
@@ -1776,7 +1779,7 @@ void SV_Physics( void )
 {
 	edict_t	*ent;
 	int    	i;
-	
+
 	SV_CheckAllEnts ();
 
 	svgame.globals->time = sv.time;
@@ -1793,7 +1796,7 @@ void SV_Physics( void )
 			continue;
 
 		if( i > 0 && i <= svs.maxclients )
-                   		continue;
+			continue;
 
 		SV_Physics_Entity( ent );
 	}
@@ -1882,17 +1885,19 @@ void SV_DrawDebugTriangles( void )
 
 	if( svgame.physFuncs.DrawDebugTriangles != NULL )
 	{
+#if 0
 		// debug draws only
 		pglDisable( GL_BLEND );
 		pglDepthMask( GL_FALSE );
 		pglDisable( GL_TEXTURE_2D );
-
+#endif
 		// draw wireframe overlay
 		svgame.physFuncs.DrawDebugTriangles ();
-
+#if 0
 		pglEnable( GL_TEXTURE_2D );
 		pglDepthMask( GL_TRUE );
 		pglEnable( GL_BLEND );
+#endif
 	}
 }
 
@@ -1962,7 +1967,7 @@ pfnPointContents
 
 =============
 */
-static int pfnPointContents( const float *pos, int groupmask )
+static int GAME_EXPORT pfnPointContents( const float *pos, int groupmask )
 {
 	int	oldmask, cont;
 
@@ -1999,19 +2004,35 @@ const char* pfnGetModelName( int modelindex )
 	return sv.model_precache[modelindex];
 }
 
+static const byte *GL_TextureData( unsigned int texnum )
+{
+#if !XASH_DEDICATED
+	return Host_IsDedicated() ? NULL : ref.dllFuncs.GL_TextureData( texnum );
+#else // XASH_DEDICATED
+	return NULL;
+#endif // XASH_DEDICATED
+}
+
 static server_physics_api_t gPhysicsAPI =
 {
 	SV_LinkEdict,
 	SV_GetServerTime,
 	SV_GetFrameTime,
-	SV_ModelHandle,
+	(void*)SV_ModelHandle,
 	SV_GetHeadNode,
 	SV_ServerState,
 	Host_Error,
+#if !XASH_DEDICATED
 	&gTriApi,	// ouch!
 	pfnDrawConsoleString,
 	pfnDrawSetTextColor,
 	pfnDrawConsoleStringLen,
+#else
+	NULL,		// ouch! ouch!
+	NULL,		// ouch! ouch!
+	NULL,		// ouch! ouch!
+	NULL,		// ouch! ouch!
+#endif
 	Con_NPrintf,
 	Con_NXPrintf,
 	SV_GetLightStyle,
@@ -2024,7 +2045,7 @@ static server_physics_api_t gPhysicsAPI =
 	pfnPointContents,
 	SV_MoveNormal,
 	SV_MoveNoEnts,
-	SV_BoxInPVS,
+	(void*)SV_BoxInPVS,
 	pfnWriteBytes,
 	Mod_CheckLump,
 	Mod_ReadLump,

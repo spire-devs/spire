@@ -14,8 +14,8 @@ GNU General Public License for more details.
 */
 
 #include "common.h"
-#include <mathlib.h>
-#include "gl_local.h"
+#include "xash3d_mathlib.h"
+#include "enginefeatures.h"
 
 //-----------------------------------------------------------------------------
 // Gamma conversion support
@@ -40,7 +40,7 @@ void BuildGammaTable( float lightgamma, float brightness )
 	else g3 = 0.125f - (brightness * brightness) * 0.075f;
 
 	g = 1.0f / lightgamma;
-	g1 = GAMMA * g; 
+	g1 = GAMMA * g;
 
 	for( i = 0; i < 256; i++ )
 	{
@@ -55,14 +55,14 @@ void BuildGammaTable( float lightgamma, float brightness )
 		else f = 0.125f + ((f - g3) / (1.0f - g3)) * 0.875f;
 
 		// convert linear space to desired gamma space
-		inf = (int)( 255.0 * pow( f, g ));
+		inf = (int)( 255.0f * pow( f, g ));
 
 		lightgammatable[i] = bound( 0, inf, 255 );
 	}
 
 	for( i = 0; i < 256; i++ )
 	{
-		f = 255.0 * pow(( float )i / 255.0f, TEXGAMMA );
+		f = 255.0f * pow(( float )i / 255.0f, TEXGAMMA );
 		inf = (int)(f + 0.5f);
 		texgammatable[i] = bound( 0, inf, 255 );
 	}
@@ -70,19 +70,25 @@ void BuildGammaTable( float lightgamma, float brightness )
 	for( i = 0; i < 1024; i++ )
 	{
 		// convert from screen gamma space to linear space
-		lineargammatable[i] = 1023 * pow( i / 1023.0, g1 );
+		lineargammatable[i] = 1023 * pow( i / 1023.0f, g1 );
 
 		// convert from linear gamma space to screen space
-		screengammatable[i] = 1023 * pow( i / 1023.0, 1.0 / g1 );
+		screengammatable[i] = 1023 * pow( i / 1023.0f, 1.0f / g1 );
 	}
 }
 
 byte LightToTexGamma( byte b )
 {
-	return lightgammatable[b];
+	if( FBitSet( host.features, ENGINE_LINEAR_GAMMA_SPACE ))
+		return b;
+	else
+		return lightgammatable[b];
 }
 
 byte TextureToGamma( byte b )
 {
-	return texgammatable[b];
+	if( FBitSet( host.features, ENGINE_LINEAR_GAMMA_SPACE ))
+		return b;
+	else
+		return texgammatable[b];
 }

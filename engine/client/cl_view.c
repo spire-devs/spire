@@ -17,9 +17,10 @@ GNU General Public License for more details.
 #include "client.h"
 #include "const.h"
 #include "entity_types.h"
-#include "gl_local.h"
 #include "vgui_draw.h"
 #include "sound.h"
+#include "input.h" // touch
+#include "platform/platform.h" // GL_UpdateSwapInterval
 
 /*
 ===============
@@ -34,42 +35,51 @@ void V_CalcViewRect( void )
 	int	sb_lines;
 	float	size;
 
-	// intermission is always full screen	
-	if( cl.intermission ) size = 120.0f;
-	else size = scr_viewsize->value;
+	if( FBitSet( host.features, ENGINE_QUAKE_COMPATIBLE ))
+	{
+		// intermission is always full screen
+		if( cl.intermission ) size = 120.0f;
+		else size = scr_viewsize->value;
 
-	if( size >= 120.0f )
-		sb_lines = 0;		// no status bar at all
-	else if( size >= 110.0f )
-		sb_lines = 24;		// no inventory
-	else sb_lines = 48;
+		if( size >= 120.0f )
+			sb_lines = 0;		// no status bar at all
+		else if( size >= 110.0f )
+			sb_lines = 24;		// no inventory
+		else sb_lines = 48;
 
-	if( scr_viewsize->value >= 100.0 )
+		if( scr_viewsize->value >= 100.0f )
+		{
+			full = true;
+			size = 100.0f;
+		}
+		else size = scr_viewsize->value;
+
+		if( cl.intermission )
+		{
+			size = 100.0f;
+			sb_lines = 0;
+			full = true;
+		}
+		size /= 100.0f;
+	}
+	else
 	{
 		full = true;
-		size = 100.0f;
-	}
-	else size = scr_viewsize->value;
-
-	if( cl.intermission )
-	{
-		size = 100.0f;
 		sb_lines = 0;
-		full = true;
+		size = 1.0f;
 	}
-	size /= 100.0;
 
-	clgame.viewport[2] = glState.width * size;
-	clgame.viewport[3] = glState.height * size;
+	clgame.viewport[2] = refState.width * size;
+	clgame.viewport[3] = refState.height * size;
 
-	if( clgame.viewport[3] > glState.height - sb_lines )
-		clgame.viewport[3] = glState.height - sb_lines;
-	if( clgame.viewport[3] > glState.height )
-		clgame.viewport[3] = glState.height;
+	if( clgame.viewport[3] > refState.height - sb_lines )
+		clgame.viewport[3] = refState.height - sb_lines;
+	if( clgame.viewport[3] > refState.height )
+		clgame.viewport[3] = refState.height;
 
-	clgame.viewport[0] = ( glState.width - clgame.viewport[2] ) / 2;
+	clgame.viewport[0] = ( refState.width - clgame.viewport[2] ) / 2;
 	if( full ) clgame.viewport[1] = 0;
-	else clgame.viewport[1] = ( glState.height - sb_lines - clgame.viewport[3] ) / 2;
+	else clgame.viewport[1] = ( refState.height - sb_lines - clgame.viewport[3] ) / 2;
 
 }
 
@@ -113,8 +123,8 @@ void V_SetRefParams( ref_params_t *fd )
 	memset( fd, 0, sizeof( ref_params_t ));
 
 	// probably this is not needs
-	VectorCopy( RI.vieworg, fd->vieworg );
-	VectorCopy( RI.viewangles, fd->viewangles );
+	VectorCopy( refState.vieworg, fd->vieworg );
+	VectorCopy( refState.viewangles, fd->viewangles );
 
 	fd->frametime = host.frametime;
 	fd->time = cl.time;
@@ -183,7 +193,7 @@ void V_RefApplyOverview( ref_viewpass_t *rvp )
 		return;
 
 	// NOTE: Xash3D may use 16:9 or 16:10 aspects
-	aspect = (float)glState.width / (float)glState.height;
+	aspect = (float)refState.width / (float)refState.height;
 
 	size_x = fabs( 8192.0f / ov->flZoom );
 	size_y = fabs( 8192.0f / (ov->flZoom * aspect ));
@@ -216,7 +226,7 @@ void V_RefApplyOverview( ref_viewpass_t *rvp )
 
 	SetBits( rvp->flags, RF_DRAW_OVERVIEW );
 
-	Mod_SetOrthoBounds( mins, maxs );
+	ref.dllFuncs.GL_OrthoBounds( mins, maxs );
 }
 
 /*
@@ -254,7 +264,7 @@ void V_GetRefParams( ref_params_t *fd, ref_viewpass_t *rvp )
 	rvp->fov_y = V_CalcFov( &rvp->fov_x, clgame.viewport[2], clgame.viewport[3] );
 
 	// adjust FOV for widescreen
-	if( glState.wideScreen && r_adjust_fov->value )
+	if( refState.wideScreen && r_adjust_fov->value )
 		V_AdjustFov( &rvp->fov_x, &rvp->fov_y, clgame.viewport[2], clgame.viewport[3], false );
 
 	rvp->flags = 0;
@@ -273,10 +283,7 @@ V_PreRender
 qboolean V_PreRender( void )
 {
 	// too early
-	if( !glw_state.initialized )
-		return false;
-
-	if( host.status == HOST_NOFOCUS )
+	if( !ref.initialized )
 		return false;
 
 	if( host.status == HOST_SLEEP )
@@ -292,8 +299,10 @@ qboolean V_PreRender( void )
 		}
 		return false;
 	}
-	
-	R_BeginFrame( !cl.paused );
+
+	ref.dllFuncs.R_BeginFrame( !cl.paused && ( cls.state == ca_active ));
+
+	GL_UpdateSwapInterval( );
 
 	return true;
 }
@@ -312,15 +321,15 @@ void V_RenderView( void )
 	ref_viewpass_t	rvp;
 	int		viewnum = 0;
 
-	if( !cl.video_prepped || ( UI_IsVisible() && !cl.background ))
+	if( !cl.video_prepped || ( !ui_renderworld->value && UI_IsVisible() && !cl.background ))
 		return; // still loading
 
 	V_CalcViewRect ();	// compute viewport rectangle
 	V_SetRefParams( &rp );
 	V_SetupViewModel ();
-	R_Set2DMode( false );
+	ref.dllFuncs.R_Set2DMode( false );
 	SCR_DirtyScreen();
-	GL_BackendStartFrame ();
+	ref.dllFuncs.GL_BackendStartFrame ();
 
 	do
 	{
@@ -330,11 +339,10 @@ void V_RenderView( void )
 
 		if( viewnum == 0 && FBitSet( rvp.flags, RF_ONLY_CLIENTDRAW ))
 		{
-			pglClearColor( 0.0f, 0.0f, 0.0f, 0.0f );
-			pglClear( GL_COLOR_BUFFER_BIT );
+			ref.dllFuncs.R_ClearScreen();
 		}
 
-		R_RenderFrame( &rvp );
+		GL_RenderFrame( &rvp );
 		S_UpdateFrame( &rvp );
 		viewnum++;
 
@@ -342,7 +350,101 @@ void V_RenderView( void )
 
 	// draw debug triangles on a server
 	SV_DrawDebugTriangles ();
-	GL_BackendEndFrame ();
+	ref.dllFuncs.GL_BackendEndFrame ();
+}
+
+#define POINT_SIZE		16.0f
+#define NODE_INTERVAL_X(x)	(x * 16.0f)
+#define NODE_INTERVAL_Y(x)	(x * 16.0f)
+
+void R_DrawLeafNode( float x, float y, float scale )
+{
+	float downScale = scale * 0.25f;// * POINT_SIZE;
+
+	ref.dllFuncs.R_DrawStretchPic( x - downScale * 0.5f, y - downScale * 0.5f, downScale, downScale, 0, 0, 1, 1, R_GetBuiltinTexture( REF_PARTICLE_TEXTURE ) );
+}
+
+void R_DrawNodeConnection( float x, float y, float x2, float y2 )
+{
+	ref.dllFuncs.Begin( TRI_LINES );
+		ref.dllFuncs.Vertex3f( x, y, 0 );
+		ref.dllFuncs.Vertex3f( x2, y2, 0 );
+	ref.dllFuncs.End( );
+}
+
+void R_ShowTree_r( mnode_t *node, float x, float y, float scale, int shownodes, mleaf_t *viewleaf )
+{
+	float	downScale = scale * 0.8f;
+
+	downScale = Q_max( downScale, 1.0f );
+
+	if( !node ) return;
+
+	world.recursion_level++;
+
+	if( node->contents < 0 )
+	{
+		mleaf_t	*leaf = (mleaf_t *)node;
+
+		if( world.recursion_level > world.max_recursion )
+			world.max_recursion = world.recursion_level;
+
+		if( shownodes == 1 )
+		{
+			if( cl.worldmodel->leafs == leaf )
+				ref.dllFuncs.Color4f( 1.0f, 1.0f, 1.0f, 1.0f );
+			else if( viewleaf && viewleaf == leaf )
+				ref.dllFuncs.Color4f( 1.0f, 0.0f, 0.0f, 1.0f );
+			else ref.dllFuncs.Color4f( 0.0f, 1.0f, 0.0f, 1.0f );
+			R_DrawLeafNode( x, y, scale );
+		}
+		world.recursion_level--;
+		return;
+	}
+
+	if( shownodes == 1 )
+	{
+		ref.dllFuncs.Color4f( 0.0f, 0.0f, 1.0f, 1.0f );
+		R_DrawLeafNode( x, y, scale );
+	}
+	else if( shownodes == 2 )
+	{
+		R_DrawNodeConnection( x, y, x - scale, y + scale );
+		R_DrawNodeConnection( x, y, x + scale, y + scale );
+	}
+
+	R_ShowTree_r( node->children[1], x - scale, y + scale, downScale, shownodes, viewleaf );
+	R_ShowTree_r( node->children[0], x + scale, y + scale, downScale, shownodes, viewleaf );
+
+	world.recursion_level--;
+}
+
+void R_ShowTree( void )
+{
+	float	x = (float)((refState.width - (int)POINT_SIZE) >> 1);
+	float	y = NODE_INTERVAL_Y(1.0f);
+	mleaf_t *viewleaf;
+
+	if( !cl.worldmodel || !CVAR_TO_BOOL( r_showtree ))
+		return;
+
+	world.recursion_level = 0;
+	viewleaf = Mod_PointInLeaf( refState.vieworg, cl.worldmodel->nodes );
+
+	//pglEnable( GL_BLEND );
+	//pglBlendFunc( GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA );
+	//pglTexEnvi( GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE );
+
+	//pglLineWidth( 2.0f );
+	ref.dllFuncs.Color4f( 1, 0.7f, 0, 1.0f );
+	//pglDisable( GL_TEXTURE_2D );
+	R_ShowTree_r( cl.worldmodel->nodes, x, y, world.max_recursion * 3.5f, 2, viewleaf );
+	//pglEnable( GL_TEXTURE_2D );
+	//pglLineWidth( 1.0f );
+
+	R_ShowTree_r( cl.worldmodel->nodes, x, y, world.max_recursion * 3.5f, 1, viewleaf );
+
+	Con_NPrintf( 0, "max recursion %d\n", world.max_recursion );
 }
 
 /*
@@ -356,14 +458,14 @@ void V_PostRender( void )
 	static double	oldtime;
 	qboolean		draw_2d = false;
 
-	R_AllowFog( false );
-	R_Set2DMode( true );
+	ref.dllFuncs.R_AllowFog( false );
+	ref.dllFuncs.R_Set2DMode( true );
 
 	if( cls.state == ca_active && cls.signon == SIGNONS && cls.scrshot_action != scrshot_mapshot )
 	{
 		SCR_TileClear();
 		CL_DrawHUD( CL_ACTIVE );
-		VGui_Paint( true );
+		VGui_Paint();
 	}
 
 	switch( cls.scrshot_action )
@@ -379,21 +481,24 @@ void V_PostRender( void )
 	{
 		SCR_RSpeeds();
 		SCR_NetSpeeds();
+		SCR_DrawPos();
 		SCR_DrawNetGraph();
 		SV_DrawOrthoTriangles();
 		CL_DrawDemoRecording();
 		CL_DrawHUD( CL_CHANGELEVEL );
-		R_ShowTextures();
+		ref.dllFuncs.R_ShowTextures();
 		R_ShowTree();
 		Con_DrawConsole();
 		UI_UpdateMenu( host.realtime );
 		Con_DrawVersion();
 		Con_DrawDebug(); // must be last
+		Touch_Draw();
+		OSK_Draw();
 
 		S_ExtraUpdate();
 	}
 
 	SCR_MakeScreenShot();
-	R_AllowFog( true );
-	R_EndFrame();
+	ref.dllFuncs.R_AllowFog( true );
+	ref.dllFuncs.R_EndFrame();
 }

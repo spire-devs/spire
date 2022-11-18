@@ -13,11 +13,26 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 GNU General Public License for more details.
 */
 
+#include <math.h>	// fabs...
 #include "common.h"
-#include "math.h"	// fabs...
+#include "base_cmd.h"
+#include "eiface.h" // ARRAYSIZE
 
 convar_t	*cvar_vars = NULL; // head of list
 convar_t	*cmd_scripting;
+
+CVAR_DEFINE_AUTO( cl_filterstuffcmd, "0", FCVAR_ARCHIVE | FCVAR_PRIVILEGED, "filter commands coming from server" );
+
+/*
+============
+Cvar_GetList
+============
+*/
+cvar_t *GAME_EXPORT Cvar_GetList( void )
+{
+	return (cvar_t *)cvar_vars;
+}
+
 
 /*
 ============
@@ -28,6 +43,10 @@ find the specified variable by name
 */
 convar_t *Cvar_FindVarExt( const char *var_name, int ignore_group )
 {
+	// TODO: ignore group for cvar
+#if defined(XASH_HASHED_VARS)
+	return (convar_t *)BaseCmd_Find( HM_CVAR, var_name );
+#else
 	convar_t	*var;
 
 	if( !var_name )
@@ -43,6 +62,7 @@ convar_t *Cvar_FindVarExt( const char *var_name, int ignore_group )
 	}
 
 	return NULL;
+#endif
 }
 
 /*
@@ -54,7 +74,7 @@ build cvar auto description that based on the setup flags
 */
 const char *Cvar_BuildAutoDescription( int flags )
 {
-	static char	desc[128];
+	static char	desc[256];
 
 	desc[0] = '\0';
 
@@ -74,6 +94,12 @@ const char *Cvar_BuildAutoDescription( int flags )
 	if( FBitSet( flags, FCVAR_ARCHIVE ))
 		Q_strncat( desc, "archived ", sizeof( desc ));
 
+	if( FBitSet( flags, FCVAR_PROTECTED ))
+		Q_strncat( desc, "protected ", sizeof( desc ));
+
+	if( FBitSet( flags, FCVAR_PRIVILEGED ))
+		Q_strncat( desc, "privileged ", sizeof( desc ));
+
 	Q_strncat( desc, "cvar", sizeof( desc ));
 
 	return desc;
@@ -90,12 +116,13 @@ static qboolean Cvar_UpdateInfo( convar_t *var, const char *value, qboolean noti
 {
 	if( FBitSet( var->flags, FCVAR_USERINFO ))
 	{
-		if ( host.type == HOST_DEDICATED )
+		if ( Host_IsDedicated() )
 		{
 			// g-cont. this is a very strange behavior...
 			Info_SetValueForKey( SV_Serverinfo(), var->name, value, MAX_SERVERINFO_STRING ),
 			SV_BroadcastCommand( "fullserverinfo \"%s\"\n", SV_Serverinfo( ));
 		}
+#if !XASH_DEDICATED
 		else
 		{
 			if( !Info_SetValueForKey( CL_Userinfo(), var->name, value, MAX_INFO_STRING ))
@@ -103,7 +130,9 @@ static qboolean Cvar_UpdateInfo( convar_t *var, const char *value, qboolean noti
 
 			// time to update server copy of userinfo
 			CL_ServerCommand( true, "setinfo \"%s\" \"%s\"\n", var->name, value );
+			CL_LegacyUpdateInfo();
 		}
+#endif
 	}
 
 	if( FBitSet( var->flags, FCVAR_SERVER ) && notify )
@@ -164,7 +193,7 @@ const char *Cvar_ValidateString( convar_t *var, const char *value )
 		pszValue = szNew;
 
 		// g-cont. is this even need?
-		if( !Q_strlen( szNew )) Q_strncpy( szNew, "empty", sizeof( szNew ));
+		if( !COM_CheckStringEmpty( szNew ) ) Q_strncpy( szNew, "empty", sizeof( szNew ));
 	}
 
 	if( FBitSet( var->flags, FCVAR_NOEXTRAWHITEPACE ))
@@ -189,6 +218,24 @@ const char *Cvar_ValidateString( convar_t *var, const char *value )
 	}
 
 	return pszValue;
+}
+
+/*
+============
+Cvar_ValidateVarName
+============
+*/
+static qboolean Cvar_ValidateVarName( const char *s, qboolean isvalue )
+{
+	if( !s )
+		return false;
+	if( Q_strchr( s, '\\' ) && !isvalue )
+		return false;
+	if( Q_strchr( s, '\"' ))
+		return false;
+	if( Q_strchr( s, ';' ) && !isvalue )
+		return false;
+	return true;
 }
 
 /*
@@ -224,6 +271,10 @@ int Cvar_UnlinkVar( const char *var_name, int group )
 			prev = &var->next;
 			continue;
 		}
+
+#if defined(XASH_HASHED_VARS)
+		BaseCmd_Remove( HM_CVAR, var->name );
+#endif
 
 		// unlink variable from list
 		freestring( var->string );
@@ -314,7 +365,7 @@ The flags will be or'ed in if the variable exists.
 convar_t *Cvar_Get( const char *name, const char *value, int flags, const char *var_desc )
 {
 	convar_t	*cur, *find, *var;
-	
+
 	ASSERT( name && *name );
 
 	// check for command coexisting
@@ -387,6 +438,11 @@ convar_t *Cvar_Get( const char *name, const char *value, int flags, const char *
 	// tell engine about changes
 	Cvar_Changed( var );
 
+#if defined(XASH_HASHED_VARS)
+	// add to map
+	BaseCmd_Insert( HM_CVAR, var, var->name );
+#endif
+
 	return var;
 }
 
@@ -434,13 +490,13 @@ void Cvar_RegisterVariable( convar_t *var )
 	if( FBitSet( var->flags, FCVAR_EXTENDED ))
 		var->def_string = var->string; // just swap pointers
 
-	var->string = copystring( var->string );	
+	var->string = copystring( var->string );
 	var->value = Q_atof( var->string );
 
 	// find the supposed position in chain (alphanumerical order)
 	for( cur = NULL, find = cvar_vars; find && Q_strcmp( find->name, var->name ) < 0; cur = find, find = find->next );
 
-	// now link variable	
+	// now link variable
 	if( cur ) cur->next = var;
 	else cvar_vars = var;
 	var->next = find;
@@ -450,6 +506,118 @@ void Cvar_RegisterVariable( convar_t *var )
 
 	// tell engine about changes
 	Cvar_Changed( var );
+
+#if defined(XASH_HASHED_VARS)
+	// add to map
+	BaseCmd_Insert( HM_CVAR, var, var->name );
+#endif
+}
+
+/*
+============
+Cvar_Set2
+============
+*/
+static convar_t *Cvar_Set2( const char *var_name, const char *value )
+{
+	convar_t	*var;
+	const char	*pszValue;
+	qboolean	dll_variable = false;
+	qboolean	force = false;
+
+	if( !Cvar_ValidateVarName( var_name, false ))
+	{
+		Con_DPrintf( S_ERROR "Invalid cvar name string: %s\n", var_name );
+		return NULL;
+	}
+
+	var = Cvar_FindVar( var_name );
+	if( !var )
+	{
+		// if cvar not found, create it
+		return Cvar_Get( var_name, value, FCVAR_USER_CREATED, NULL );
+	}
+	else
+	{	
+		if( !Cmd_CurrentCommandIsPrivileged( ))
+		{
+			if( FBitSet( var->flags, FCVAR_PRIVILEGED ))
+			{
+				Con_Printf( "%s is priveleged.\n", var->name );
+				return var;
+			}
+
+			if( cl_filterstuffcmd.value > 0.0f && FBitSet( var->flags, FCVAR_FILTERABLE ))
+			{
+				Con_Printf( "%s is filterable.\n", var->name );
+				return var;
+			}
+		}
+	}
+
+	// use this check to prevent acessing for unexisting fields
+	// for cvar_t: latched_string, description, etc
+	dll_variable = FBitSet( var->flags, FCVAR_EXTDLL );
+
+	// check value
+	if( !value )
+	{
+		if( !FBitSet( var->flags, FCVAR_EXTENDED|FCVAR_ALLOCATED ))
+		{
+			Con_Printf( "%s has no default value and can't be reset.\n", var->name );
+			return var;
+		}
+
+		if( dll_variable )
+			value = "0";
+		else
+			value = var->def_string; // reset to default value
+	}
+
+	if( !Q_strcmp( value, var->string ))
+		return var;
+
+	// any latched values not allowed for game cvars
+	if( dll_variable )
+		force = true;
+
+	if( !force )
+	{ 
+		if( FBitSet( var->flags, FCVAR_READ_ONLY ))
+		{
+			Con_Printf( "%s is read-only.\n", var->name );
+			return var;
+		}
+
+		if( FBitSet( var->flags, FCVAR_CHEAT ) && !host.allow_cheats )
+		{
+			Con_Printf( "%s is cheat protected.\n", var->name );
+			return var;
+		}
+
+		// just tell user about deferred changes
+		if( FBitSet( var->flags, FCVAR_LATCH ) && ( SV_Active() || CL_Active( )))
+			Con_Printf( "%s will be changed upon restarting.\n", var->name );
+	}
+
+	pszValue = Cvar_ValidateString( var, value );
+
+	// nothing to change
+	if( !Q_strcmp( pszValue, var->string ))
+		return var;
+
+	// fill it cls.userinfo, svs.serverinfo
+	if( !Cvar_UpdateInfo( var, pszValue, true ))
+		return var;
+
+	// and finally changed the cvar itself
+	freestring( var->string );
+	var->string = copystring( pszValue );
+	var->value = Q_atof( var->string );
+
+	// tell engine about changes
+	Cvar_Changed( var );
+	return var;
 }
 
 /*
@@ -462,7 +630,7 @@ way to change value for many cvars
 void Cvar_DirectSet( convar_t *var, const char *value )
 {
 	const char	*pszValue;
-	
+
 	if( !var ) return;	// ???
 
 	// lookup for registration
@@ -476,12 +644,12 @@ void Cvar_DirectSet( convar_t *var, const char *value )
 	if( var != Cvar_FindVar( var->name ))
 		return; // how this possible?
 
-	if( FBitSet( var->flags, FCVAR_READ_ONLY|FCVAR_GLCONFIG ))
+	if( FBitSet( var->flags, FCVAR_READ_ONLY ))
 	{
 		Con_Printf( "%s is read-only.\n", var->name );
 		return;
 	}
-	
+
 	if( FBitSet( var->flags, FCVAR_CHEAT ) && !host.allow_cheats )
 	{
 		Con_Printf( "%s is cheat protected.\n", var->name );
@@ -554,9 +722,18 @@ void Cvar_FullSet( const char *var_name, const char *value, int flags )
 Cvar_Set
 ============
 */
-void Cvar_Set( const char *var_name, const char *value )
+void GAME_EXPORT Cvar_Set( const char *var_name, const char *value )
 {
-	convar_t	*var = Cvar_FindVar( var_name );
+	convar_t	*var;
+
+	if( !var_name )
+	{
+		// there is an error in C code if this happens
+		Con_Printf( "Cvar_Set: passed NULL variable name\n" );
+		return;
+	}
+
+	var = Cvar_FindVar( var_name );
 
 	if( !var )
 	{
@@ -573,10 +750,10 @@ void Cvar_Set( const char *var_name, const char *value )
 Cvar_SetValue
 ============
 */
-void Cvar_SetValue( const char *var_name, float value )
+void GAME_EXPORT Cvar_SetValue( const char *var_name, float value )
 {
 	char	val[32];
-	
+
 	if( fabs( value - (int)value ) < 0.000001 )
 		Q_snprintf( val, sizeof( val ), "%d", (int)value );
 	else Q_snprintf( val, sizeof( val ), "%f", value );
@@ -599,9 +776,16 @@ void Cvar_Reset( const char *var_name )
 Cvar_VariableValue
 ============
 */
-float Cvar_VariableValue( const char *var_name )
+float GAME_EXPORT Cvar_VariableValue( const char *var_name )
 {
 	convar_t	*var;
+
+	if( !var_name )
+	{
+		// there is an error in C code if this happens
+		Con_Printf( "Cvar_VariableValue: passed NULL variable name\n" );
+		return 0.0f;
+	}
 
 	var = Cvar_FindVar( var_name );
 	if( !var ) return 0.0f;
@@ -629,9 +813,16 @@ int Cvar_VariableInteger( const char *var_name )
 Cvar_VariableString
 ============
 */
-char *Cvar_VariableString( const char *var_name )
+const char *Cvar_VariableString( const char *var_name )
 {
 	convar_t	*var;
+
+	if( !var_name )
+	{
+		// there is an error in C code if this happens
+		Con_Printf( "Cvar_VariableString: passed NULL variable name\n" );
+		return "";
+	}
 
 	var = Cvar_FindVar( var_name );
 	if( !var ) return "";
@@ -679,25 +870,71 @@ void Cvar_SetCheatState( void )
 
 /*
 ============
+Cvar_SetGL
+
+As Cvar_Set, but also flags it as glconfig
+============
+*/
+static void Cvar_SetGL( const char *name, const char *value )
+{
+	convar_t *var = Cvar_FindVar( name );
+
+	if( var && !FBitSet( var->flags, FCVAR_GLCONFIG ))
+	{
+		Con_Reportf( S_ERROR "Can't set non-GL cvar %s to %s\n", name, value );
+		return;
+	}
+
+	Cvar_FullSet( name, value, FCVAR_GLCONFIG );
+}
+
+static qboolean Cvar_ShouldSetCvar( convar_t *v, qboolean isPrivileged )
+{
+	const char *prefixes[] = { "cl_", "gl_", "m_", "r_", "hud_" };
+	int i;
+
+	if( isPrivileged )
+		return true;
+
+	if( FBitSet( v->flags, FCVAR_PRIVILEGED ))
+		return false;
+
+	if( cl_filterstuffcmd.value <= 0.0f )
+		return true;
+
+	if( FBitSet( v->flags, FCVAR_FILTERABLE ))
+		return false;
+
+	for( i = 0; i < ARRAYSIZE( prefixes ); i++ )
+	{
+		if( !Q_strnicmp( v->name, prefixes[i], Q_strlen( prefixes[i] )))
+			return false;
+	}
+
+	return true;
+}
+
+/*
+============
 Cvar_Command
 
 Handles variable inspection and changing from the console
 ============
 */
-qboolean Cvar_Command( void )
+qboolean Cvar_CommandWithPrivilegeCheck( convar_t *v, qboolean isPrivileged )
 {
-	convar_t	*v;
-
 	// special case for setup opengl configuration
 	if( host.apply_opengl_config )
 	{
-		Cvar_FullSet( Cmd_Argv( 0 ), Cmd_Argv( 1 ), FCVAR_GLCONFIG );
+		Cvar_SetGL( Cmd_Argv( 0 ), Cmd_Argv( 1 ) );
 		return true;
 	}
 
 	// check variables
-	v = Cvar_FindVar( Cmd_Argv( 0 ));
-	if( !v ) return false;
+	if( !v ) // already found in basecmd
+		v = Cvar_FindVar( Cmd_Argv( 0 ));
+	if( !v )
+		return false;
 
 	// perform a variable print or set
 	if( Cmd_Argc() == 1 )
@@ -720,6 +957,11 @@ qboolean Cvar_Command( void )
 		Con_Printf( "can't set \"%s\" in multiplayer\n", v->name );
 		return false;
 	}
+	else if( !Cvar_ShouldSetCvar( v, isPrivileged ))
+	{
+		Con_Printf( "%s is a privileged variable\n", v->name );
+		return true;
+	}
 	else
 	{
 		Cvar_DirectSet( v, Cmd_Argv( 1 ));
@@ -740,7 +982,7 @@ with the specified flag set to true.
 void Cvar_WriteVariables( file_t *f, int group )
 {
 	convar_t	*var;
-	
+
 	for( var = cvar_vars; var; var = var->next )
 	{
 		if( FBitSet( var->flags, group ))
@@ -772,6 +1014,40 @@ void Cvar_Toggle_f( void )
 
 /*
 ============
+Cvar_Set_f
+
+Allows setting and defining of arbitrary cvars from console, even if they
+weren't declared in C code.
+============
+*/
+void Cvar_Set_f( void )
+{
+	int	i, c, l = 0, len;
+	char	combined[MAX_CMD_TOKENS];
+
+	c = Cmd_Argc();
+	if( c < 3 )
+	{
+		Msg( S_USAGE "set <variable> <value>\n" );
+		return;
+	}
+	combined[0] = 0;
+
+	for( i = 2; i < c; i++ )
+	{
+		len = Q_strlen( Cmd_Argv(i) + 1 );
+		if( l + len >= MAX_CMD_TOKENS - 2 )
+			break;
+		Q_strcat( combined, Cmd_Argv( i ));
+		if( i != c-1 ) Q_strcat( combined, " " );
+		l += len;
+	}
+
+	Cvar_Set2( Cmd_Argv( 1 ), combined );
+}
+
+/*
+============
 Cvar_SetGL_f
 
 As Cvar_Set, but also flags it as glconfig
@@ -779,13 +1055,15 @@ As Cvar_Set, but also flags it as glconfig
 */
 void Cvar_SetGL_f( void )
 {
+	convar_t *var;
+
 	if( Cmd_Argc() != 3 )
 	{
 		Con_Printf( S_USAGE "setgl <variable> <value>\n" );
 		return;
 	}
 
-	Cvar_FullSet( Cmd_Argv( 1 ), Cmd_Argv( 2 ), FCVAR_GLCONFIG );
+	Cvar_SetGL( Cmd_Argv( 1 ), Cmd_Argv( 2 ) );
 }
 
 /*
@@ -812,19 +1090,23 @@ Cvar_List_f
 void Cvar_List_f( void )
 {
 	convar_t	*var;
-	char	*match = NULL;
+	const char	*match = NULL;
 	char	*value;
 	int	count = 0;
+	size_t	matchlen = 0;
 
 	if( Cmd_Argc() > 1 )
+	{
 		match = Cmd_Argv( 1 );
+		matchlen = Q_strlen( match );
+	}
 
 	for( var = cvar_vars; var; var = var->next )
 	{
 		if( var->name[0] == '@' )
 			continue;	// never shows system cvars
 
-		if( match && !Q_stricmpext( match, var->name ))
+		if( match && !Q_strnicmpext( match, var->name, matchlen ))
 			continue;
 
 		if( Q_colorstr( var->string ))
@@ -875,11 +1157,59 @@ Reads in all archived cvars
 void Cvar_Init( void )
 {
 	cvar_vars = NULL;
-	cmd_scripting = Cvar_Get( "cmd_scripting", "0", FCVAR_ARCHIVE, "enable simple condition checking and variable operations" );
-	Cvar_RegisterVariable (&host_developer); // early registering for dev 
-
-	Cmd_AddCommand( "setgl", Cvar_SetGL_f, "create or change the value of a opengl variable" );	// OBSOLETE
-	Cmd_AddCommand( "toggle", Cvar_Toggle_f, "toggles a console variable's values (use for more info)" );
-	Cmd_AddCommand( "reset", Cvar_Reset_f, "reset any type variable to initial value" );
+	cmd_scripting = Cvar_Get( "cmd_scripting", "0", FCVAR_ARCHIVE|FCVAR_PRIVILEGED, "enable simple condition checking and variable operations" );
+	Cvar_RegisterVariable( &host_developer ); // early registering for dev
+	Cvar_RegisterVariable( &cl_filterstuffcmd );
+	Cmd_AddRestrictedCommand( "setgl", Cvar_SetGL_f, "change the value of a opengl variable" );	// OBSOLETE
+	Cmd_AddRestrictedCommand( "toggle", Cvar_Toggle_f, "toggles a console variable's values (use for more info)" );
+	Cmd_AddRestrictedCommand( "reset", Cvar_Reset_f, "reset any type variable to initial value" );
+	Cmd_AddCommand( "set", Cvar_Set_f, "create or change the value of a console variable" );
 	Cmd_AddCommand( "cvarlist", Cvar_List_f, "display all console variables beginning with the specified prefix" );
 }
+
+#if XASH_ENGINE_TESTS
+#include "tests.h"
+
+void Test_RunCvar( void )
+{
+	convar_t *test_privileged = Cvar_Get( "test_privileged", "0", FCVAR_PRIVILEGED, "bark bark" );
+	convar_t *test_unprivileged = Cvar_Get( "test_unprivileged", "0", 0, "meow meow" );
+	convar_t *hud_filtered = Cvar_Get( "hud_filtered", "0", 0, "dummy description" );
+	convar_t *filtered2 = Cvar_Get( "filtered2", "0", FCVAR_FILTERABLE, "filtered2" );
+
+	Cbuf_AddText( "test_privileged 1; test_unprivileged 1; hud_filtered 1; filtered2 1\n" );
+	Cbuf_Execute();
+	TASSERT( test_privileged->value   != 0.0f );
+	TASSERT( test_unprivileged->value != 0.0f );
+	TASSERT( hud_filtered->value      != 0.0f );
+	TASSERT( filtered2->value         != 0.0f );
+
+	Cvar_DirectSet( test_privileged,   "0" );
+	Cvar_DirectSet( test_unprivileged, "0" );
+	Cvar_DirectSet( hud_filtered,      "0" );
+	Cvar_DirectSet( filtered2,         "0" );
+	Cvar_DirectSet( &cl_filterstuffcmd, "0" );
+	Cbuf_AddFilteredText( "test_privileged 1; test_unprivileged 1; hud_filtered 1; filtered2 1\n" );
+	Cbuf_Execute();
+	Cbuf_Execute();
+	Cbuf_Execute();
+	TASSERT( test_privileged->value   == 0.0f );
+	TASSERT( test_unprivileged->value != 0.0f );
+	TASSERT( hud_filtered->value      != 0.0f );
+	TASSERT( filtered2->value         != 0.0f );
+
+	Cvar_DirectSet( test_privileged,   "0" );
+	Cvar_DirectSet( test_unprivileged, "0" );
+	Cvar_DirectSet( hud_filtered,      "0" );
+	Cvar_DirectSet( filtered2,         "0" );
+	Cvar_DirectSet( &cl_filterstuffcmd, "1" );
+	Cbuf_AddFilteredText( "test_privileged 1; test_unprivileged 1; hud_filtered 1; filtered2 1\n" );
+	Cbuf_Execute();
+	Cbuf_Execute();
+	Cbuf_Execute();
+	TASSERT( test_privileged->value   == 0.0f );
+	TASSERT( test_unprivileged->value != 0.0f );
+	TASSERT( hud_filtered->value      == 0.0f );
+	TASSERT( filtered2->value         == 0.0f );
+}
+#endif

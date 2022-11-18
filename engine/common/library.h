@@ -16,127 +16,7 @@ GNU General Public License for more details.
 #ifndef LIBRARY_H
 #define LIBRARY_H
 
-#define DOS_SIGNATURE		0x5A4D		// MZ
-#define NT_SIGNATURE		0x00004550	// PE00
-#define NUMBER_OF_DIRECTORY_ENTRIES	16
 #define MAX_LIBRARY_EXPORTS		4096
-
-#ifndef IMAGE_SIZEOF_BASE_RELOCATION
-#define IMAGE_SIZEOF_BASE_RELOCATION	( sizeof( IMAGE_BASE_RELOCATION ))
-#endif
-
-typedef struct
-{	
-	// dos .exe header
-	word	e_magic;		// magic number
-	word	e_cblp;		// bytes on last page of file
-	word	e_cp;		// pages in file
-	word	e_crlc;		// relocations
-	word	e_cparhdr;	// size of header in paragraphs
-	word	e_minalloc;	// minimum extra paragraphs needed
-	word	e_maxalloc;	// maximum extra paragraphs needed
-	word	e_ss;		// initial (relative) SS value
-	word	e_sp;		// initial SP value
-	word	e_csum;		// checksum
-	word	e_ip;		// initial IP value
-	word	e_cs;		// initial (relative) CS value
-	word	e_lfarlc;		// file address of relocation table
-	word	e_ovno;		// overlay number
-	word	e_res[4];		// reserved words
-	word	e_oemid;		// OEM identifier (for e_oeminfo)
-	word	e_oeminfo;	// OEM information; e_oemid specific
-	word	e_res2[10];	// reserved words
-	long	e_lfanew;		// file address of new exe header
-} DOS_HEADER;
-
-typedef struct
-{	
-	// win .exe header
-	word	Machine;
-	word	NumberOfSections;
-	dword	TimeDateStamp;
-	dword	PointerToSymbolTable;
-	dword	NumberOfSymbols;
-	word	SizeOfOptionalHeader;
-	word	Characteristics;
-} PE_HEADER;
-
-typedef struct
-{
-	byte	Name[8];	// dos name length
-
-	union
-	{
-		dword	PhysicalAddress;
-		dword	VirtualSize;
-	} Misc;
-
-	dword	VirtualAddress;
-	dword	SizeOfRawData;
-	dword	PointerToRawData;
-	dword	PointerToRelocations;
-	dword	PointerToLinenumbers;
-	word	NumberOfRelocations;
-	word	NumberOfLinenumbers;
-	dword	Characteristics;
-} SECTION_HEADER;
-
-typedef struct
-{
-	dword	VirtualAddress;
-	dword	Size;
-} DATA_DIRECTORY;
-
-typedef struct
-{
-	word	Magic;
-	byte	MajorLinkerVersion;
-	byte	MinorLinkerVersion;
-	dword	SizeOfCode;
-	dword	SizeOfInitializedData;
-	dword	SizeOfUninitializedData;
-	dword	AddressOfEntryPoint;
-	dword	BaseOfCode;
-	dword	BaseOfData;
-	dword	ImageBase;
-	dword	SectionAlignment;
-	dword	FileAlignment;
-	word	MajorOperatingSystemVersion;
-	word	MinorOperatingSystemVersion;
-	word	MajorImageVersion;
-	word	MinorImageVersion;
-	word	MajorSubsystemVersion;
-	word	MinorSubsystemVersion;
-	dword	Win32VersionValue;
-	dword	SizeOfImage;
-	dword	SizeOfHeaders;
-	dword	CheckSum;
-	word	Subsystem;
-	word	DllCharacteristics;
-	dword	SizeOfStackReserve;
-	dword	SizeOfStackCommit;
-	dword	SizeOfHeapReserve;
-	dword	SizeOfHeapCommit;
-	dword	LoaderFlags;
-	dword	NumberOfRvaAndSizes;
-
-	DATA_DIRECTORY	DataDirectory[NUMBER_OF_DIRECTORY_ENTRIES];
-} OPTIONAL_HEADER;
-
-typedef struct
-{
-	dword	Characteristics;
-	dword	TimeDateStamp;
-	word	MajorVersion;
-	word	MinorVersion;
-	dword	Name;
-	dword	Base;
-	dword	NumberOfFunctions;
-	dword	NumberOfNames;
-	dword	AddressOfFunctions;		// RVA from base of image
-	dword	AddressOfNames;		// RVA from base of image
-	dword	AddressOfNameOrdinals;	// RVA from base of image
-} EXPORT_DIRECTORY;
 
 typedef struct dll_user_s
 {
@@ -146,19 +26,63 @@ typedef struct dll_user_s
 	char	dllName[32];		// for debug messages
 	string	fullPath, shortPath;	// actual dll paths
 
-	// ordinals stuff
+	// ordinals stuff, valid only on Win32
 	word	*ordinals;
 	dword	*funcs;
 	char	*names[MAX_LIBRARY_EXPORTS];	// max 4096 exports supported
 	int	num_ordinals;		// actual exports count
-	dword	funcBase;			// base offset
+	uintptr_t	funcBase;			// base offset
 } dll_user_t;
 
 dll_user_t *FS_FindLibrary( const char *dllname, qboolean directpath );
 void *COM_LoadLibrary( const char *dllname, int build_ordinals_table, qboolean directpath );
 void *COM_GetProcAddress( void *hInstance, const char *name );
-const char *COM_NameForFunction( void *hInstance, dword function );
-dword COM_FunctionFromName( void *hInstance, const char *pName );
+const char *COM_NameForFunction( void *hInstance, void *function );
+void *COM_FunctionFromName_SR( void *hInstance, const char *pName ); // Save/Restore version
+void *COM_FunctionFromName( void *hInstance, const char *pName );
 void COM_FreeLibrary( void *hInstance );
+const char *COM_GetLibraryError( void );
+qboolean COM_CheckLibraryDirectDependency( const char *name, const char *depname, qboolean directpath );
+
+// TODO: Move to internal?
+void COM_ResetLibraryError( void );
+void COM_PushLibraryError( const char *error );
+const char *COM_OffsetNameForFunction( void *function );
+
+typedef enum
+{
+	LIBRARY_CLIENT,
+	LIBRARY_SERVER,
+	LIBRARY_GAMEUI
+} ECommonLibraryType;
+
+void COM_GetCommonLibraryPath( ECommonLibraryType eLibType, char *out, size_t size );
+
+typedef enum
+{
+	MANGLE_UNKNOWN = 0,
+
+	/* binary offset, when NameForFunction isn't implemented */
+	MANGLE_OFFSET,
+
+	/* Itanium C++ ABI mangling, native for most operating systems */
+	MANGLE_ITANIUM,
+
+	/* MSVC "decoration" */
+	MANGLE_MSVC,
+
+	/* Valve's silly mangle for crossplatform saves */
+	MANGLE_VALVE,
+} EFunctionMangleType;
+
+// converts to MANGLE_VALVE if possible
+const char *COM_GetPlatformNeutralName( const char *in_name );
+
+// converts to native mangling, result must be freed
+char **COM_ConvertToLocalPlatform( EFunctionMangleType to, const char *from, size_t *numfuncs );
+
+// used by lib_win.c
+char *COM_GetMSVCName( const char *in_name );
+
 
 #endif//LIBRARY_H

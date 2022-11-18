@@ -16,11 +16,11 @@ GNU General Public License for more details.
 #include "common.h"
 #include "client.h"
 #include "const.h"
-#include "gl_local.h"
 #include "library.h"
 #include "input.h"
+#include "server.h" // !!svgame.hInstance
+#include "vid_common.h"
 
-static MENUAPI	GetMenuAPI;
 static void 	UI_UpdateUserinfo( void );
 
 gameui_static_t	gameui;
@@ -47,7 +47,7 @@ void UI_UpdateMenu( float realtime )
 	gameui.globals->frametime = host.realframetime;
 	gameui.globals->demoplayback = cls.demoplayback;
 	gameui.globals->demorecording = cls.demorecording;
-	gameui.globals->allow_console = host.allow_console;
+	gameui.globals->developer = host.allow_console;
 
 	gameui.dllFuncs.pfnRedraw( realtime );
 	UI_UpdateUserinfo();
@@ -135,7 +135,162 @@ qboolean UI_IsVisible( void )
 	return gameui.dllFuncs.pfnIsVisible();
 }
 
-static void UI_DrawLogo( const char *filename, float x, float y, float width, float height )
+/*
+=======================
+UI_AddTouchButtonToList
+
+send button parameters to menu
+=======================
+*/
+void UI_AddTouchButtonToList( const char *name, const char *texture, const char *command, unsigned char *color, int flags )
+{
+	if( gameui.dllFuncs2.pfnAddTouchButtonToList )
+	{
+		gameui.dllFuncs2.pfnAddTouchButtonToList( name, texture, command, color, flags );
+	}
+}
+
+/*
+=================
+UI_ResetPing
+
+notify gameui dll about latency reset
+=================
+*/
+void UI_ResetPing( void )
+{
+	if( gameui.dllFuncs2.pfnResetPing )
+	{
+		gameui.dllFuncs2.pfnResetPing( );
+	}
+}
+
+/*
+=================
+UI_ShowConnectionWarning
+
+show connection warning dialog implemented by gameui dll
+=================
+*/
+void UI_ShowConnectionWarning( void )
+{
+	if( cls.state != ca_connected )
+		return;
+
+	if( Host_IsLocalClient() )
+		return;
+
+	if( ++cl.lostpackets == 8 )
+	{
+		CL_Disconnect();
+		if( gameui.dllFuncs2.pfnShowConnectionWarning )
+		{
+			gameui.dllFuncs2.pfnShowConnectionWarning();
+		}
+		Con_DPrintf( S_WARN "Too many lost packets! Showing Network options menu\n" );
+	}
+}
+
+
+/*
+=================
+UI_ShowConnectionWarning
+
+show update dialog
+=================
+*/
+void UI_ShowUpdateDialog( qboolean preferStore )
+{
+	if( gameui.dllFuncs2.pfnShowUpdateDialog )
+	{
+		gameui.dllFuncs2.pfnShowUpdateDialog( preferStore );
+	}
+
+	Con_Printf( S_WARN "This version is not supported anymore. To continue, install latest engine version\n" );
+}
+
+/*
+=================
+UI_ShowConnectionWarning
+
+show message box
+=================
+*/
+void UI_ShowMessageBox( const char *text )
+{
+	if( gameui.dllFuncs2.pfnShowMessageBox )
+	{
+		gameui.dllFuncs2.pfnShowMessageBox( text );
+	}
+}
+
+void UI_ConnectionProgress_Disconnect( void )
+{
+	if( gameui.dllFuncs2.pfnConnectionProgress_Disconnect )
+	{
+		gameui.dllFuncs2.pfnConnectionProgress_Disconnect( );
+	}
+}
+
+void UI_ConnectionProgress_Download( const char *pszFileName, const char *pszServerName, const char *pszServerPath, int iCurrent, int iTotal, const char *comment )
+{
+	if( !gameui.dllFuncs2.pfnConnectionProgress_Download )
+		return;
+
+	if( pszServerPath )
+	{
+		char serverpath[MAX_SYSPATH];
+
+		Q_snprintf( serverpath, sizeof( serverpath ), "%s%s", pszServerName, pszServerPath );
+		gameui.dllFuncs2.pfnConnectionProgress_Download( pszFileName, serverpath, iCurrent, iTotal, comment );
+	}
+	else
+	{
+		gameui.dllFuncs2.pfnConnectionProgress_Download( pszFileName, pszServerName, iCurrent, iTotal, comment );
+	}
+}
+
+void UI_ConnectionProgress_DownloadEnd( void )
+{
+	if( gameui.dllFuncs2.pfnConnectionProgress_DownloadEnd )
+	{
+		gameui.dllFuncs2.pfnConnectionProgress_DownloadEnd( );
+	}
+}
+
+void UI_ConnectionProgress_Precache( void )
+{
+	if( gameui.dllFuncs2.pfnConnectionProgress_Precache )
+	{
+		gameui.dllFuncs2.pfnConnectionProgress_Precache( );
+	}
+}
+
+void UI_ConnectionProgress_Connect( const char *server ) // NULL for local server
+{
+	if( gameui.dllFuncs2.pfnConnectionProgress_Connect )
+	{
+		gameui.dllFuncs2.pfnConnectionProgress_Connect( server );
+	}
+}
+
+void UI_ConnectionProgress_ChangeLevel( void )
+{
+	if( gameui.dllFuncs2.pfnConnectionProgress_ChangeLevel )
+	{
+		gameui.dllFuncs2.pfnConnectionProgress_ChangeLevel( );
+	}
+}
+
+void UI_ConnectionProgress_ParseServerInfo( const char *server )
+{
+	if( gameui.dllFuncs2.pfnConnectionProgress_ParseServerInfo )
+	{
+		gameui.dllFuncs2.pfnConnectionProgress_ParseServerInfo( server );
+	}
+}
+
+static void GAME_EXPORT UI_DrawLogo( const char *filename, float x, float y, float width, float height )
 {
 	static float	cin_time;
 	static int	last_frame = -1;
@@ -151,7 +306,7 @@ static void UI_DrawLogo( const char *filename, float x, float y, float width, fl
 	{
 		string		path;
 		const char	*fullpath;
-	
+
 		// run cinematic if not
 		Q_snprintf( path, sizeof( path ), "media/%s", filename );
 		COM_DefaultExtension( path, ".avi" );
@@ -201,20 +356,20 @@ static void UI_DrawLogo( const char *filename, float x, float y, float width, fl
 		redraw = true;
 	}
 
-	R_DrawStretchRaw( x, y, width, height, gameui.logo_xres, gameui.logo_yres, cin_data, redraw );
+	ref.dllFuncs.R_DrawStretchRaw( x, y, width, height, gameui.logo_xres, gameui.logo_yres, cin_data, redraw );
 }
 
-static int UI_GetLogoWidth( void )
+static int GAME_EXPORT UI_GetLogoWidth( void )
 {
 	return gameui.logo_xres;
 }
 
-static int UI_GetLogoHeight( void )
+static int GAME_EXPORT UI_GetLogoHeight( void )
 {
 	return gameui.logo_yres;
 }
 
-static float UI_GetLogoLength( void )
+static float GAME_EXPORT UI_GetLogoLength( void )
 {
 	return gameui.logo_length;
 }
@@ -235,7 +390,7 @@ static void UI_UpdateUserinfo( void )
 	player->bottomcolor = Q_atoi( Info_ValueForKey( player->userinfo, "bottomcolor" ));
 	host.userinfo_changed = false; // we got it
 }
-	
+
 void Host_Credits( void )
 {
 	if( !gameui.hInstance ) return;
@@ -248,7 +403,7 @@ static void UI_ConvertGameInfo( GAMEINFO *out, gameinfo_t *in )
 	Q_strncpy( out->startmap, in->startmap, sizeof( out->startmap ));
 	Q_strncpy( out->trainmap, in->trainmap, sizeof( out->trainmap ));
 	Q_strncpy( out->title, in->title, sizeof( out->title ));
-	Q_strncpy( out->version, va( "%g", in->version ), sizeof( out->version ));
+	Q_snprintf( out->version, sizeof( out->version ), "%g", in->version );
 
 	Q_strncpy( out->game_url, in->game_url, sizeof( out->game_url ));
 	Q_strncpy( out->update_url, in->update_url, sizeof( out->update_url ));
@@ -262,6 +417,8 @@ static void UI_ConvertGameInfo( GAMEINFO *out, gameinfo_t *in )
 		out->flags |= GFL_NOMODELS;
 	if( in->noskills )
 		out->flags |= GFL_NOSKILLS;
+	if( in->render_picbutton_text )
+		out->flags |= GFL_RENDER_PICBUTTON_TEXT;
 }
 
 static qboolean PIC_Scissor( float *x, float *y, float *width, float *height, float *u0, float *v0, float *u1, float *v1 )
@@ -358,8 +515,8 @@ static void PIC_DrawGeneric( float x, float y, float width, float height, const 
 		return;
 
 	PicAdjustSize( &x, &y, &width, &height );
-	R_DrawStretchPic( x, y, width, height, s1, t1, s2, t2, gameui.ds.gl_texturenum );
-	pglColor4ub( 255, 255, 255, 255 );
+	ref.dllFuncs.R_DrawStretchPic( x, y, width, height, s1, t1, s2, t2, gameui.ds.gl_texturenum );
+	ref.dllFuncs.Color4ub( 255, 255, 255, 255 );
 }
 
 /*
@@ -374,13 +531,13 @@ pfnPIC_Load
 
 =========
 */
-static HIMAGE pfnPIC_Load( const char *szPicName, const byte *image_buf, long image_size, long flags )
+static HIMAGE GAME_EXPORT pfnPIC_Load( const char *szPicName, const byte *image_buf, int image_size, int flags )
 {
 	HIMAGE	tx;
 
-	if( !szPicName || !*szPicName )
+	if( !COM_CheckString( szPicName ))
 	{
-		Con_Reportf( S_ERROR "CL_LoadImage: bad name!\n" );
+		Con_Reportf( S_ERROR "CL_LoadImage: refusing to load image with empty name\n" );
 		return 0;
 	}
 
@@ -388,7 +545,7 @@ static HIMAGE pfnPIC_Load( const char *szPicName, const byte *image_buf, long im
 	SetBits( flags, TF_IMAGE );
 
 	Image_SetForceFlags( IL_LOAD_DECAL ); // allow decal images for menu
-	tx = GL_LoadTexture( szPicName, image_buf, image_size, flags );
+	tx = ref.dllFuncs.GL_LoadTexture( szPicName, image_buf, image_size, flags );
 	Image_ClearForceFlags();
 
 	return tx;
@@ -400,7 +557,7 @@ pfnPIC_Width
 
 =========
 */
-static int pfnPIC_Width( HIMAGE hPic )
+static int GAME_EXPORT pfnPIC_Width( HIMAGE hPic )
 {
 	int	picWidth;
 
@@ -415,7 +572,7 @@ pfnPIC_Height
 
 =========
 */
-static int pfnPIC_Height( HIMAGE hPic )
+static int GAME_EXPORT pfnPIC_Height( HIMAGE hPic )
 {
 	int	picHeight;
 
@@ -430,14 +587,14 @@ pfnPIC_Set
 
 =========
 */
-void pfnPIC_Set( HIMAGE hPic, int r, int g, int b, int a )
+void GAME_EXPORT pfnPIC_Set( HIMAGE hPic, int r, int g, int b, int a )
 {
 	gameui.ds.gl_texturenum = hPic;
 	r = bound( 0, r, 255 );
 	g = bound( 0, g, 255 );
 	b = bound( 0, b, 255 );
 	a = bound( 0, a, 255 );
-	pglColor4ub( r, g, b, a );
+	ref.dllFuncs.Color4ub( r, g, b, a );
 }
 
 /*
@@ -446,9 +603,9 @@ pfnPIC_Draw
 
 =========
 */
-void pfnPIC_Draw( int x, int y, int width, int height, const wrect_t *prc )
+void GAME_EXPORT pfnPIC_Draw( int x, int y, int width, int height, const wrect_t *prc )
 {
-	GL_SetRenderMode( kRenderNormal );
+	ref.dllFuncs.GL_SetRenderMode( kRenderNormal );
 	PIC_DrawGeneric( x, y, width, height, prc );
 }
 
@@ -458,9 +615,9 @@ pfnPIC_DrawTrans
 
 =========
 */
-void pfnPIC_DrawTrans( int x, int y, int width, int height, const wrect_t *prc )
+void GAME_EXPORT pfnPIC_DrawTrans( int x, int y, int width, int height, const wrect_t *prc )
 {
-	GL_SetRenderMode( kRenderTransTexture );
+	ref.dllFuncs.GL_SetRenderMode( kRenderTransTexture );
 	PIC_DrawGeneric( x, y, width, height, prc );
 }
 
@@ -470,9 +627,9 @@ pfnPIC_DrawHoles
 
 =========
 */
-void pfnPIC_DrawHoles( int x, int y, int width, int height, const wrect_t *prc )
+void GAME_EXPORT pfnPIC_DrawHoles( int x, int y, int width, int height, const wrect_t *prc )
 {
-	GL_SetRenderMode( kRenderTransAlpha );
+	ref.dllFuncs.GL_SetRenderMode( kRenderTransAlpha );
 	PIC_DrawGeneric( x, y, width, height, prc );
 }
 
@@ -482,9 +639,9 @@ pfnPIC_DrawAdditive
 
 =========
 */
-void pfnPIC_DrawAdditive( int x, int y, int width, int height, const wrect_t *prc )
+void GAME_EXPORT pfnPIC_DrawAdditive( int x, int y, int width, int height, const wrect_t *prc )
 {
-	GL_SetRenderMode( kRenderTransAdd );
+	ref.dllFuncs.GL_SetRenderMode( kRenderTransAdd );
 	PIC_DrawGeneric( x, y, width, height, prc );
 }
 
@@ -494,7 +651,7 @@ pfnPIC_EnableScissor
 
 =========
 */
-static void pfnPIC_EnableScissor( int x, int y, int width, int height )
+static void GAME_EXPORT pfnPIC_EnableScissor( int x, int y, int width, int height )
 {
 	// check bounds
 	x = bound( 0, x, gameui.globals->scrWidth );
@@ -515,7 +672,7 @@ pfnPIC_DisableScissor
 
 =========
 */
-static void pfnPIC_DisableScissor( void )
+static void GAME_EXPORT pfnPIC_DisableScissor( void )
 {
 	gameui.ds.scissor_x = 0;
 	gameui.ds.scissor_width = 0;
@@ -530,16 +687,16 @@ pfnFillRGBA
 
 =============
 */
-static void pfnFillRGBA( int x, int y, int width, int height, int r, int g, int b, int a )
+static void GAME_EXPORT pfnFillRGBA( int x, int y, int width, int height, int r, int g, int b, int a )
 {
 	r = bound( 0, r, 255 );
 	g = bound( 0, g, 255 );
 	b = bound( 0, b, 255 );
 	a = bound( 0, a, 255 );
-	pglColor4ub( r, g, b, a );
-	GL_SetRenderMode( kRenderTransTexture );
-	R_DrawStretchPic( x, y, width, height, 0, 0, 1, 1, tr.whiteTexture );
-	pglColor4ub( 255, 255, 255, 255 );
+	ref.dllFuncs.Color4ub( r, g, b, a );
+	ref.dllFuncs.GL_SetRenderMode( kRenderTransTexture );
+	ref.dllFuncs.R_DrawStretchPic( x, y, width, height, 0, 0, 1, 1, R_GetBuiltinTexture( REF_WHITE_TEXTURE ) );
+	ref.dllFuncs.Color4ub( 255, 255, 255, 255 );
 }
 
 /*
@@ -548,7 +705,7 @@ pfnClientCmd
 
 =============
 */
-static void pfnClientCmd( int exec_now, const char *szCmdString )
+static void GAME_EXPORT pfnClientCmd( int exec_now, const char *szCmdString )
 {
 	if( !szCmdString || !szCmdString[0] )
 		return;
@@ -566,7 +723,7 @@ pfnPlaySound
 
 =============
 */
-static void pfnPlaySound( const char *szSound )
+static void GAME_EXPORT pfnPlaySound( const char *szSound )
 {
 	if( !COM_CheckString( szSound )) return;
 	S_StartLocalSound( szSound, VOL_NORM, false );
@@ -579,7 +736,7 @@ pfnDrawCharacter
 quakefont draw character
 =============
 */
-static void pfnDrawCharacter( int ix, int iy, int iwidth, int iheight, int ch, int ulRGBA, HIMAGE hFont )
+static void GAME_EXPORT pfnDrawCharacter( int ix, int iy, int iwidth, int iheight, int ch, int ulRGBA, HIMAGE hFont )
 {
 	rgba_t	color;
 	float	row, col, size;
@@ -597,7 +754,7 @@ static void pfnDrawCharacter( int ix, int iy, int iwidth, int iheight, int ch, i
 	color[0] = (ulRGBA & 0xFF0000) >> 16;
 	color[1] = (ulRGBA & 0xFF00) >> 8;
 	color[2] = (ulRGBA & 0xFF) >> 0;
-	pglColor4ubv( color );
+	ref.dllFuncs.Color4ub( color[0], color[1], color[2], color[3] );
 
 	col = (ch & 15) * 0.0625f + (0.5f / 256.0f);
 	row = (ch >> 4) * 0.0625f + (0.5f / 256.0f);
@@ -612,19 +769,19 @@ static void pfnDrawCharacter( int ix, int iy, int iwidth, int iheight, int ch, i
 	if( gameui.ds.scissor_test && !PIC_Scissor( &x, &y, &width, &height, &s1, &t1, &s2, &t2 ))
 		return;
 
-	GL_SetRenderMode( kRenderTransTexture );
-	R_DrawStretchPic( x, y, width, height, s1, t1, s2, t2, hFont );
-	pglColor4ub( 255, 255, 255, 255 );
+	ref.dllFuncs.GL_SetRenderMode( kRenderTransTexture );
+	ref.dllFuncs.R_DrawStretchPic( x, y, width, height, s1, t1, s2, t2, hFont );
+	ref.dllFuncs.Color4ub( 255, 255, 255, 255 );
 }
 
 /*
 =============
 UI_DrawConsoleString
 
-drawing string like a console string 
+drawing string like a console string
 =============
 */
-static int UI_DrawConsoleString( int x, int y, const char *string )
+static int GAME_EXPORT UI_DrawConsoleString( int x, int y, const char *string )
 {
 	int	drawLen;
 
@@ -642,7 +799,7 @@ pfnDrawSetTextColor
 set color for anything
 =============
 */
-static void UI_DrawSetTextColor( int r, int g, int b, int alpha )
+static void GAME_EXPORT UI_DrawSetTextColor( int r, int g, int b, int alpha )
 {
 	// bound color and convert to byte
 	gameui.ds.textColor[0] = r;
@@ -658,7 +815,7 @@ pfnGetPlayerModel
 for drawing playermodel previews
 ====================
 */
-static cl_entity_t* pfnGetPlayerModel( void )
+static cl_entity_t* GAME_EXPORT pfnGetPlayerModel( void )
 {
 	return &gameui.playermodel;
 }
@@ -670,7 +827,7 @@ pfnSetPlayerModel
 for drawing playermodel previews
 ====================
 */
-static void pfnSetPlayerModel( cl_entity_t *ent, const char *path )
+static void GAME_EXPORT pfnSetPlayerModel( cl_entity_t *ent, const char *path )
 {
 	ent->model = Mod_ForName( path, false, false );
 	ent->curstate.modelindex = MAX_MODELS; // unreachable index
@@ -683,10 +840,10 @@ pfnClearScene
 for drawing playermodel previews
 ====================
 */
-static void pfnClearScene( void )
+static void GAME_EXPORT pfnClearScene( void )
 {
-	R_PushScene();
-	R_ClearScene();
+	ref.dllFuncs.R_PushScene();
+	ref.dllFuncs.R_ClearScene();
 }
 
 /*
@@ -696,19 +853,23 @@ pfnRenderScene
 for drawing playermodel previews
 ====================
 */
-static void pfnRenderScene( const ref_viewpass_t *rvp )
+static void GAME_EXPORT pfnRenderScene( const ref_viewpass_t *rvp )
 {
+	ref_viewpass_t copy;
+
 	// to avoid division by zero
 	if( !rvp || rvp->fov_x <= 0.0f || rvp->fov_y <= 0.0f )
 		return;
 
-	// don't allow special modes from menu
-	((ref_viewpass_t *)&rvp)->flags = 0;
+	copy = *rvp;
 
-	R_Set2DMode( false );
-	R_RenderFrame( rvp );
-	R_Set2DMode( true );
-	R_PopScene();
+	// don't allow special modes from menu
+	copy.flags = 0;
+
+	ref.dllFuncs.R_Set2DMode( false );
+	GL_RenderFrame( &copy );
+	ref.dllFuncs.R_Set2DMode( true );
+	ref.dllFuncs.R_PopScene();
 }
 
 /*
@@ -718,9 +879,9 @@ pfnAddEntity
 adding player model into visible list
 ====================
 */
-static int pfnAddEntity( int entityType, cl_entity_t *ent )
+static int GAME_EXPORT pfnAddEntity( int entityType, cl_entity_t *ent )
 {
-	if( !R_AddEntity( ent, entityType ))
+	if( !ref.dllFuncs.R_AddEntity( ent, entityType ))
 		return false;
 	return true;
 }
@@ -732,7 +893,7 @@ pfnClientJoin
 send client connect
 ====================
 */
-static void pfnClientJoin( const netadr_t adr )
+static void GAME_EXPORT pfnClientJoin( const netadr_t adr )
 {
 	Cbuf_AddText( va( "connect %s\n", NET_AdrToString( adr )));
 }
@@ -744,7 +905,7 @@ pfnKeyGetOverstrikeMode
 get global key overstrike state
 ====================
 */
-static int pfnKeyGetOverstrikeMode( void )
+static int GAME_EXPORT pfnKeyGetOverstrikeMode( void )
 {
 	return host.key_overstrike;
 }
@@ -756,7 +917,7 @@ pfnKeySetOverstrikeMode
 set global key overstrike mode
 ====================
 */
-static void pfnKeySetOverstrikeMode( int fActive )
+static void GAME_EXPORT pfnKeySetOverstrikeMode( int fActive )
 {
 	host.key_overstrike = fActive;
 }
@@ -792,7 +953,7 @@ pfnMemFree
 
 =========
 */
-static void pfnMemFree( void *mem, const char *filename, const int fileline )
+static void GAME_EXPORT pfnMemFree( void *mem, const char *filename, const int fileline )
 {
 	_Mem_Free( mem, filename, fileline );
 }
@@ -803,7 +964,7 @@ pfnGetGameInfo
 
 =========
 */
-static int pfnGetGameInfo( GAMEINFO *pgameinfo )
+static int GAME_EXPORT pfnGetGameInfo( GAMEINFO *pgameinfo )
 {
 	if( !pgameinfo ) return 0;
 
@@ -817,9 +978,9 @@ pfnGetGamesList
 
 =========
 */
-static GAMEINFO **pfnGetGamesList( int *numGames )
+static GAMEINFO ** GAME_EXPORT pfnGetGamesList( int *numGames )
 {
-	if( numGames ) *numGames = SI.numgames;
+	if( numGames ) *numGames = FI->numgames;
 	return gameui.modsInfo;
 }
 
@@ -830,7 +991,7 @@ pfnGetFilesList
 release prev search on a next call
 =========
 */
-static char **pfnGetFilesList( const char *pattern, int *numFiles, int gamedironly )
+static char ** GAME_EXPORT pfnGetFilesList( const char *pattern, int *numFiles, int gamedironly )
 {
 	static search_t	*t = NULL;
 
@@ -865,17 +1026,29 @@ pfnCheckGameDll
 
 =========
 */
-int pfnCheckGameDll( void )
+int GAME_EXPORT pfnCheckGameDll( void )
 {
+	string dllpath;
 	void	*hInst;
 
-	if( SV_Initialized( )) return true;
+#if TARGET_OS_IPHONE
+	// loading server library drains too many ram
+	// so 512MB iPod Touch cannot even connect to
+	// to servers in cstrike
+	return true;
+#endif
 
-	if(( hInst = COM_LoadLibrary( GI->game_dll, true, false )) != NULL )
+	if( svgame.hInstance )
+		return true;
+
+	COM_GetCommonLibraryPath( LIBRARY_SERVER, dllpath, sizeof( dllpath ));
+
+	if(( hInst = COM_LoadLibrary( dllpath, true, false )) != NULL )
 	{
-		COM_FreeLibrary( hInst );
+		COM_FreeLibrary( hInst ); // don't increase linker's reference counter
 		return true;
 	}
+	Con_Reportf( S_WARN "Could not load server library: %s\n", COM_GetLibraryError() );
 	return false;
 }
 
@@ -885,12 +1058,9 @@ pfnChangeInstance
 
 =========
 */
-static void pfnChangeInstance( const char *newInstance, const char *szFinalMessage )
+static void GAME_EXPORT pfnChangeInstance( const char *newInstance, const char *szFinalMessage )
 {
-	if( !szFinalMessage ) szFinalMessage = "";
-	if( !newInstance || !*newInstance ) return;
-
-	Host_NewInstance( newInstance, szFinalMessage );
+	Con_Reportf( S_ERROR "ChangeInstance menu call is deprecated!\n" );
 }
 
 /*
@@ -899,10 +1069,10 @@ pfnHostEndGame
 
 =========
 */
-static void pfnHostEndGame( const char *szFinalMessage )
+static void GAME_EXPORT pfnHostEndGame( const char *szFinalMessage )
 {
 	if( !szFinalMessage ) szFinalMessage = "";
-	Host_EndGame( true, szFinalMessage );
+	Host_EndGame( false, "%s", szFinalMessage );
 }
 
 /*
@@ -911,13 +1081,68 @@ pfnStartBackgroundTrack
 
 =========
 */
-static void pfnStartBackgroundTrack( const char *introTrack, const char *mainTrack )
+static void GAME_EXPORT pfnStartBackgroundTrack( const char *introTrack, const char *mainTrack )
 {
 	S_StartBackgroundTrack( introTrack, mainTrack, 0, false );
 }
 
+static void GAME_EXPORT GL_ProcessTexture( int texnum, float gamma, int topColor, int bottomColor )
+{
+	ref.dllFuncs.GL_ProcessTexture( texnum, gamma, topColor, bottomColor );
+}
+
+
+/*
+=================
+UI_ShellExecute
+=================
+*/
+static void GAME_EXPORT UI_ShellExecute( const char *path, const char *parms, int shouldExit )
+{
+	Platform_ShellExecute( path, parms );
+
+	if( shouldExit )
+		Sys_Quit();
+}
+
+/*
+==============
+pfnParseFile
+
+legacy wrapper
+==============
+*/
+static char *pfnParseFile( char *buf, char *token )
+{
+	return COM_ParseFile( buf, token, INT_MAX );
+}
+
+/*
+=============
+pfnFileExists
+
+legacy wrapper
+=============
+*/
+static int pfnFileExists( const char *path, int gamedironly )
+{
+	return FS_FileExists( path, gamedironly );
+}
+
+/*
+=============
+pfnDelete
+
+legacy wrapper
+=============
+*/
+static int pfnDelete( const char *path )
+{
+	return FS_Delete( path );
+}
+
 // engine callbacks
-static ui_enginefuncs_t gEngfuncs = 
+static ui_enginefuncs_t gEngfuncs =
 {
 	pfnPIC_Load,
 	GL_FreeImage,
@@ -958,17 +1183,17 @@ static ui_enginefuncs_t gEngfuncs =
 	Con_DefaultColor,
 	pfnGetPlayerModel,
 	pfnSetPlayerModel,
-	pfnClearScene,	
+	pfnClearScene,
 	pfnRenderScene,
 	pfnAddEntity,
 	Host_Error,
-	FS_FileExists,
+	pfnFileExists,
 	pfnGetGameDir,
 	Cmd_CheckMapsList,
 	CL_Active,
 	pfnClientJoin,
 	COM_LoadFileForMe,
-	COM_ParseFile,
+	pfnParseFile,
 	COM_FreeFile,
 	Key_ClearStates,
 	Key_SetKeyDest,
@@ -988,7 +1213,7 @@ static ui_enginefuncs_t gEngfuncs =
 	CL_GetDemoComment,
 	pfnCheckGameDll,
 	pfnGetClipboardData,
-	Sys_ShellExecute,
+	UI_ShellExecute,
 	Host_WriteServerConfig,
 	pfnChangeInstance,
 	pfnStartBackgroundTrack,
@@ -1000,8 +1225,44 @@ static ui_enginefuncs_t gEngfuncs =
 	GL_ProcessTexture,
 	COM_CompareFileTime,
 	VID_GetModeString,
-	COM_SaveFile,
-	FS_Delete,
+	(void*)COM_SaveFile,
+	pfnDelete
+};
+
+static void pfnEnableTextInput( int enable )
+{
+	Key_EnableTextInput( enable, false );
+}
+
+static int pfnGetRenderers( unsigned int num, char *shortName, size_t size1, char *readableName, size_t size2 )
+{
+	if( num >= ref.numRenderers )
+		return 0;
+
+	if( shortName && size1 )
+		Q_strncpy( shortName, ref.shortNames[num], size1 );
+
+	if( readableName && size2 )
+		Q_strncpy( readableName, ref.readableNames[num], size2 );
+
+	return 1;
+}
+
+static char *pfnParseFileSafe( char *data, char *buf, const int size, unsigned int flags, int *len )
+{
+	return COM_ParseFileSafe( data, buf, size, flags, len, NULL );
+}
+
+static ui_extendedfuncs_t gExtendedfuncs =
+{
+	pfnEnableTextInput,
+	Con_UtfProcessChar,
+	Con_UtfMoveLeft,
+	Con_UtfMoveRight,
+	pfnGetRenderers,
+	Sys_DoubleTime,
+	pfnParseFileSafe,
+	NET_AdrToString
 };
 
 void UI_UnloadProgs( void )
@@ -1024,7 +1285,12 @@ void UI_UnloadProgs( void )
 qboolean UI_LoadProgs( void )
 {
 	static ui_enginefuncs_t	gpEngfuncs;
+	static ui_extendedfuncs_t gpExtendedfuncs;
 	static ui_globalvars_t	gpGlobals;
+	UIEXTENEDEDAPI GetExtAPI;
+	UITEXTAPI	GiveTextApi;
+	MENUAPI	GetMenuAPI;
+	string dllpath;
 	int			i;
 
 	if( gameui.hInstance ) UI_UnloadProgs();
@@ -1032,11 +1298,26 @@ qboolean UI_LoadProgs( void )
 	// setup globals
 	gameui.globals = &gpGlobals;
 
-	if(( gameui.hInstance = COM_LoadLibrary( va( "%s/menu.dll", GI->dll_path ), false, false )) == NULL )
+	COM_GetCommonLibraryPath( LIBRARY_GAMEUI, dllpath, sizeof( dllpath ));
+
+	if(!( gameui.hInstance = COM_LoadLibrary( dllpath, false, false )))
 	{
-		if(( gameui.hInstance = COM_LoadLibrary( "menu.dll", false, true )) == NULL )
+		string path = OS_LIB_PREFIX "menu." OS_LIB_EXT;
+
+		FS_AllowDirectPaths( true );
+
+		// no use to load it from engine directory, as library loader
+		// that implements internal gamelibs already knows how to load it
+#ifndef XASH_INTERNAL_GAMELIBS
+		if(!( gameui.hInstance = COM_LoadLibrary( path, false, true )))
+#endif
+		{
+			FS_AllowDirectPaths( false );
 			return false;
+		}
 	}
+
+	FS_AllowDirectPaths( false );
 
 	if(( GetMenuAPI = (MENUAPI)COM_GetProcAddress( gameui.hInstance, "GetMenuAPI" )) == NULL )
 	{
@@ -1045,6 +1326,9 @@ qboolean UI_LoadProgs( void )
 		gameui.hInstance = NULL;
 		return false;
 	}
+
+
+	gameui.use_text_api = false;
 
 	// make local copy of engfuncs to prevent overwrite it with user dll
 	memcpy( &gpEngfuncs, &gEngfuncs, sizeof( gpEngfuncs ));
@@ -1060,19 +1344,54 @@ qboolean UI_LoadProgs( void )
 		return false;
 	}
 
+	// make local copy of engfuncs to prevent overwrite it with user dll
+	memcpy( &gpExtendedfuncs, &gExtendedfuncs, sizeof( gExtendedfuncs ));
+	memset( &gameui.dllFuncs2, 0, sizeof( gameui.dllFuncs2 ));
+
+	// try to initialize new extended API
+	if( ( GetExtAPI = (UIEXTENEDEDAPI)COM_GetProcAddress( gameui.hInstance, "GetExtAPI" ) ) )
+	{
+		Con_Reportf( "UI_LoadProgs: extended Menu API found\n" );
+		if( GetExtAPI( MENU_EXTENDED_API_VERSION, &gameui.dllFuncs2, &gpExtendedfuncs ) )
+		{
+			Con_Reportf( "UI_LoadProgs: extended Menu API initialized\n" );
+			gameui.use_text_api = true;
+		}
+	}
+	else // otherwise, fallback to old and deprecated extensions
+	{
+		if( ( GiveTextApi = (UITEXTAPI)COM_GetProcAddress( gameui.hInstance, "GiveTextAPI" ) ) )
+		{
+			Con_Reportf( "UI_LoadProgs: extended text API found\n" );
+			Con_Reportf( S_WARN "Text API is deprecated! If you are mod developer, consider moving to Extended Menu API!\n" );
+			if( GiveTextApi( &gpExtendedfuncs ) ) // they are binary compatible, so we can just pass extended funcs API to menu
+			{
+				Con_Reportf( "UI_LoadProgs: extended text API initialized\n" );
+				gameui.use_text_api = true;
+			}
+		}
+
+		gameui.dllFuncs2.pfnAddTouchButtonToList = (ADDTOUCHBUTTONTOLIST)COM_GetProcAddress( gameui.hInstance, "AddTouchButtonToList" );
+		if( gameui.dllFuncs2.pfnAddTouchButtonToList )
+		{
+			Con_Reportf( "UI_LoadProgs: AddTouchButtonToList call found\n" );
+			Con_Reportf( S_WARN "AddTouchButtonToList is deprecated! If you are mod developer, consider moving to Extended Menu API!\n" );
+		}
+	}
+
 	Cvar_FullSet( "host_gameuiloaded", "1", FCVAR_READ_ONLY );
 
 	// setup gameinfo
-	for( i = 0; i < SI.numgames; i++ )
+	for( i = 0; i < FI->numgames; i++ )
 	{
 		gameui.modsInfo[i] = Mem_Calloc( gameui.mempool, sizeof( GAMEINFO ));
-		UI_ConvertGameInfo( gameui.modsInfo[i], SI.games[i] );
+		UI_ConvertGameInfo( gameui.modsInfo[i], FI->games[i] );
 	}
 
-	UI_ConvertGameInfo( &gameui.gameInfo, SI.GameInfo ); // current gameinfo
+	UI_ConvertGameInfo( &gameui.gameInfo, FI->GameInfo ); // current gameinfo
 
 	// setup globals
-	gameui.globals->allow_console = host.allow_console;
+	gameui.globals->developer = host.allow_console;
 
 	// initialize game
 	gameui.dllFuncs.pfnInit();

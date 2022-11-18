@@ -181,7 +181,7 @@ void SV_ParseConsistencyResponse( sv_client_t *cl, sizebuf_t *msg )
 		if( svgame.dllFuncs.pfnInconsistentFile( cl->edict, sv.resources[badresindex - 1].szFileName, dropmessage ))
 		{
 			if( COM_CheckString( dropmessage ))
-				SV_ClientPrintf( cl, dropmessage );
+				SV_ClientPrintf( cl, "%s", dropmessage );
 			SV_DropClient( cl, false );
 		}
 	}
@@ -212,7 +212,7 @@ void SV_TransferConsistencyInfo( void )
 		SetBits( pResource->ucFlags, RES_CHECKFILE );
 
 		if( pResource->type == t_sound )
-			Q_snprintf( filepath, sizeof( filepath ), "%s%s", DEFAULT_SOUNDPATH, pResource->szFileName );
+			Q_snprintf( filepath, sizeof( filepath ), DEFAULT_SOUNDPATH "%s", pResource->szFileName );
 		else Q_strncpy( filepath, pResource->szFileName, sizeof( filepath ));
 
 		MD5_HashFile( pResource->rgucMD5_hash, filepath, NULL );
@@ -533,7 +533,7 @@ void SV_BatchUploadRequest( sv_client_t *cl )
 
 void SV_SendResource( resource_t *pResource, sizebuf_t *msg )
 {
-	static byte	nullrguc[36];
+	static byte	nullrguc[sizeof( pResource->rguc_reserved )];
 
 	MSG_WriteUBitLong( msg, pResource->type, 4 );
 	MSG_WriteString( msg, pResource->szFileName );
@@ -551,7 +551,7 @@ void SV_SendResource( resource_t *pResource, sizebuf_t *msg )
 	}
 	else MSG_WriteOneBit( msg, 0 );
 }
- 
+
 void SV_SendResources( sv_client_t *cl, sizebuf_t *msg )
 {
 	int	i;

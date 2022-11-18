@@ -72,7 +72,7 @@ static void FindNextChunk( const char *name )
 			iff_dataPtr = NULL;
 			return;
 		}
-		
+
 		iff_dataPtr += 4;
 		iff_chunkLen = GetLittleLong();
 
@@ -85,7 +85,7 @@ static void FindNextChunk( const char *name )
 		iff_dataPtr -= 8;
 		iff_lastChunk = iff_dataPtr + 8 + ((iff_chunkLen + 1) & ~1);
 
-		if( !Q_strncmp( iff_dataPtr, name, 4 ))
+		if( !Q_strncmp( (const char *)iff_dataPtr, name, 4 ))
 			return;
 	}
 }
@@ -139,7 +139,7 @@ qboolean StreamFindNextChunk( file_t *file, const char *name, int *last_chunk )
 Sound_LoadWAV
 =============
 */
-qboolean Sound_LoadWAV( const char *name, const byte *buffer, size_t filesize )
+qboolean Sound_LoadWAV( const char *name, const byte *buffer, fs_offset_t filesize )
 {
 	int	samples, fmt;
 	qboolean	mpeg_stream = false;
@@ -153,7 +153,7 @@ qboolean Sound_LoadWAV( const char *name, const byte *buffer, size_t filesize )
 	// find "RIFF" chunk
 	FindChunk( "RIFF" );
 
-	if( !( iff_dataPtr && !Q_strncmp( iff_dataPtr + 8, "WAVE", 4 )))
+	if( !( iff_dataPtr && !Q_strncmp( (const char *)iff_dataPtr + 8, "WAVE", 4 )))
 	{
 		Con_DPrintf( S_ERROR "Sound_LoadWAV: %s missing 'RIFF/WAVE' chunks\n", name );
 		return false;
@@ -216,15 +216,15 @@ qboolean Sound_LoadWAV( const char *name, const byte *buffer, size_t filesize )
 
 		if( iff_dataPtr )
 		{
-			if( !Q_strncmp( iff_dataPtr + 28, "mark", 4 ))
-			{	
+			if( !Q_strncmp( (const char *)iff_dataPtr + 28, "mark", 4 ))
+			{
 				// this is not a proper parse, but it works with CoolEdit...
 				iff_dataPtr += 24;
 				sound.samples = sound.loopstart + GetLittleLong(); // samples in loop
 			}
 		}
 	}
-	else 
+	else
 	{
 		sound.loopstart = -1;
 		sound.samples = 0;
@@ -254,7 +254,7 @@ qboolean Sound_LoadWAV( const char *name, const byte *buffer, size_t filesize )
 
 	if( sound.samples <= 0 )
 	{
-		Con_DPrintf( S_ERROR "Sound_LoadWAV: file with %i samples (%s)\n", sound.samples, name );
+		Con_Reportf( S_ERROR "Sound_LoadWAV: file with %i samples (%s)\n", sound.samples, name );
 		return false;
 	}
 
@@ -287,7 +287,7 @@ qboolean Sound_LoadWAV( const char *name, const byte *buffer, size_t filesize )
 	if( sound.width == 1 )
 	{
 		int	i, j;
-		char	*pData = sound.wav;
+		signed char	*pData = (signed char *)sound.wav;
 
 		for( i = 0; i < sound.samples; i++ )
 		{
@@ -321,7 +321,7 @@ stream_t *Stream_OpenWAV( const char *filename )
 
 	// open
 	file = FS_Open( filename, "rb", false );
-	if( !file ) return NULL;	
+	if( !file ) return NULL;
 
 	// find "RIFF" chunk
 	if( !StreamFindNextChunk( file, "RIFF", &last_chunk ))
@@ -392,7 +392,7 @@ stream_t *Stream_OpenWAV( const char *filename )
 	stream->width = sound.width;
 	stream->rate = sound.rate;
 	stream->type = WF_PCMDATA;
-	
+
 	return stream;
 }
 
@@ -403,7 +403,7 @@ Stream_ReadWAV
 assume stream is valid
 =================
 */
-long Stream_ReadWAV( stream_t *stream, long bytes, void *buffer )
+int Stream_ReadWAV( stream_t *stream, int bytes, void *buffer )
 {
 	int	remaining;
 
@@ -426,7 +426,7 @@ Stream_SetPosWAV
 assume stream is valid
 =================
 */
-long Stream_SetPosWAV( stream_t *stream, long newpos )
+int Stream_SetPosWAV( stream_t *stream, int newpos )
 {
 	// NOTE: stream->pos it's real file position without header size
 	if( FS_Seek( stream->file, stream->buffsize + newpos, SEEK_SET ) != -1 )
@@ -445,7 +445,7 @@ Stream_GetPosWAV
 assume stream is valid
 =================
 */
-long Stream_GetPosWAV( stream_t *stream )
+int Stream_GetPosWAV( stream_t *stream )
 {
 	return stream->pos;
 }

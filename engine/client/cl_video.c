@@ -15,7 +15,6 @@ GNU General Public License for more details.
 
 #include "common.h"
 #include "client.h"
-#include "gl_local.h"
 
 /*
 =================================================================
@@ -25,7 +24,7 @@ AVI PLAYING
 =================================================================
 */
 
-static long		xres, yres;
+static int		xres, yres;
 static float		video_duration;
 static float		cin_time;
 static int		cin_frame;
@@ -85,9 +84,10 @@ void SCR_CreateStartupVids( void )
 void SCR_CheckStartupVids( void )
 {
 	int	c = 0;
-	char	*afile, *pfile;
+	byte *afile;
+	char *pfile;
 	string	token;
-		
+
 	if( Sys_CheckParm( "-nointro" ) || host_developer.value || cls.demonum != -1 || GameState->nextstate != STATE_RUNFRAME )
 	{
 		// don't run movies where we in developer-mode
@@ -102,9 +102,9 @@ void SCR_CheckStartupVids( void )
 	afile = FS_LoadFile( DEFAULT_VIDEOLIST_PATH, NULL, false );
 	if( !afile ) return; // something bad happens
 
-	pfile = afile;
+	pfile = (char *)afile;
 
-	while(( pfile = COM_ParseFile( pfile, token )) != NULL )
+	while(( pfile = COM_ParseFile( pfile, token, sizeof( token ))) != NULL )
 	{
 		Q_strncpy( cls.movies[c], token, sizeof( cls.movies[0] ));
 
@@ -122,7 +122,7 @@ void SCR_CheckStartupVids( void )
 	SCR_NextMovie ();
 	Cbuf_Execute();
 }
-		
+
 /*
 ==================
 SCR_RunCinematic
@@ -152,7 +152,7 @@ void SCR_RunCinematic( void )
 		return;
 	}
 
-	// advances cinematic time (ignores maxfps and host_framerate settings)	
+	// advances cinematic time (ignores maxfps and host_framerate settings)
 	cin_time += host.realframetime;
 
 	// stop the video after it finishes
@@ -180,7 +180,7 @@ qboolean SCR_DrawCinematic( void )
 	qboolean		redraw = false;
 	byte		*frame = NULL;
 
-	if( !glw_state.initialized || cin_time <= 0.0f )
+	if( !ref.initialized || cin_time <= 0.0f )
 		return false;
 
 	if( cin_frame != last_frame )
@@ -190,11 +190,11 @@ qboolean SCR_DrawCinematic( void )
 		redraw = true;
 	}
 
-	R_DrawStretchRaw( 0, 0, glState.width, glState.height, xres, yres, frame, redraw );
+	ref.dllFuncs.R_DrawStretchRaw( 0, 0, refState.width, refState.height, xres, yres, frame, redraw );
 
 	return true;
 }
-  
+
 /*
 ==================
 SCR_PlayCinematic
@@ -238,11 +238,11 @@ qboolean SCR_PlayCinematic( const char *arg )
 	Con_FastClose();
 	cin_time = 0.0f;
 	cls.signon = 0;
-	
+
 	return true;
 }
 
-long SCR_GetAudioChunk( char *rawdata, long length )
+int SCR_GetAudioChunk( char *rawdata, int length )
 {
 	int	r;
 
@@ -258,7 +258,7 @@ wavdata_t *SCR_GetMovieInfo( void )
 		return &cin_audio;
 	return NULL;
 }
-	
+
 /*
 ==================
 SCR_StopCinematic

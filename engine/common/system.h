@@ -20,27 +20,19 @@ GNU General Public License for more details.
 extern "C" {
 #endif
 
+#include "port.h"
+
 #include <setjmp.h>
 #include <stdio.h>
 #include <time.h>
-#include <windows.h>
-
-#define MSGBOX( x )		MessageBox( NULL, x, "Xash Error", MB_OK|MB_SETFOREGROUND|MB_ICONSTOP )
-#define MSGBOX2( x )	MessageBox( host.hWnd, x, "Host Error", MB_OK|MB_SETFOREGROUND|MB_ICONSTOP )
-#define MSGBOX3( x )	MessageBox( host.hWnd, x, "Host Recursive Error", MB_OK|MB_SETFOREGROUND|MB_ICONSTOP )
-
-// basic typedefs
-typedef int		sound_t;
-typedef float		vec_t;
-typedef vec_t		vec2_t[2];
-typedef vec_t		vec3_t[3];
-typedef vec_t		vec4_t[4];
-typedef byte		rgba_t[4];	// unsigned byte colorpack
-typedef vec_t		matrix3x4[3][4];
-typedef vec_t		matrix4x4[4][4];
-
+#include "xash3d_types.h"
 #include "const.h"
+#include "crtlib.h"
+#include "platform/platform.h"
 
+#define MSGBOX( x )	Platform_MessageBox( "Xash Error", (x), false );
+#define MSGBOX2( x )	Platform_MessageBox( "Host Error", (x), true );
+#define MSGBOX3( x )	Platform_MessageBox( "Host Recursive Error", (x), true );
 #define ASSERT( exp )	if(!( exp )) Sys_Error( "assert failed at %s:%i\n", __FILE__, __LINE__ )
 
 /*
@@ -52,55 +44,56 @@ NOTE: never change this structure because all dll descriptions in xash code
 writes into struct by offsets not names
 ========================================================================
 */
-typedef struct dllfunc_s
-{
-	const char	*name;
-	void		**func;
-} dllfunc_t;
-
-typedef struct dll_info_s
-{
-	const char	*name;	// name of library
-	const dllfunc_t	*fcts;	// list of dll exports	
-	qboolean		crash;	// crash if dll not found
-	void		*link;	// hinstance of loading library
-} dll_info_t;
 
 void Sys_Sleep( int msec );
 double Sys_DoubleTime( void );
 char *Sys_GetClipboardData( void );
-char *Sys_GetCurrentUser( void );
+const char *Sys_GetCurrentUser( void );
 int Sys_CheckParm( const char *parm );
-void Sys_Error( const char *error, ... );
+void Sys_Warn( const char *format, ... ) _format( 1 );
+void Sys_Error( const char *error, ... ) _format( 1 );
 qboolean Sys_LoadLibrary( dll_info_t *dll );
 void* Sys_GetProcAddress( dll_info_t *dll, const char* name );
 qboolean Sys_FreeLibrary( dll_info_t *dll );
-void Sys_ParseCommandLine( LPSTR lpCmdLine, qboolean uncensored );
-void Sys_MergeCommandLine( LPSTR lpCmdLine );
-long _stdcall Sys_Crash( PEXCEPTION_POINTERS pInfo );
-void Sys_SetClipboardData( const byte *buffer, size_t size );
+void Sys_ParseCommandLine( int argc, char **argv );
+void Sys_MergeCommandLine( void );
+void Sys_SetupCrashHandler( void );
+void Sys_RestoreCrashHandler( void );
+void Sys_DebugBreak( void );
 #define Sys_GetParmFromCmdLine( parm, out ) _Sys_GetParmFromCmdLine( parm, out, sizeof( out ))
-qboolean _Sys_GetParmFromCmdLine( char *parm, char *out, size_t size );
-void Sys_ShellExecute( const char *path, const char *parms, qboolean exit );
-const char *Sys_GetMachineKey( int *nLength );
+qboolean _Sys_GetParmFromCmdLine( const char *parm, char *out, size_t size );
+qboolean Sys_GetIntFromCmdLine( const char *parm, int *out );
 void Sys_SendKeyEvents( void );
 void Sys_Print( const char *pMsg );
 void Sys_PrintLog( const char *pMsg );
 void Sys_InitLog( void );
 void Sys_CloseLog( void );
-void Sys_Quit( void );
+void Sys_Quit( void ) NORETURN;
+qboolean Sys_NewInstance( const char *gamedir );
 
 //
 // sys_con.c
 //
-void Con_ShowConsole( qboolean show );
-void Con_WinPrint( const char *pMsg );
-void Con_InitConsoleCommands( void );
-void Con_CreateConsole( void );
-void Con_DestroyConsole( void );
-void Con_RegisterHotkeys( void );
-void Con_DisableInput( void );
-char *Con_Input( void );
+char *Sys_Input( void );
+void Sys_DestroyConsole( void );
+void Sys_CloseLog( void );
+void Sys_InitLog( void );
+void Sys_PrintLog( const char *pMsg );
+int Sys_LogFileNo( void );
+
+//
+// con_win.c
+//
+#if XASH_WIN32
+void Wcon_InitConsoleCommands( void );
+void Wcon_ShowConsole( qboolean show );
+void Wcon_CreateConsole( void );
+void Wcon_DestroyConsole( void );
+void Wcon_DisableInput( void );
+char *Wcon_Input( void );
+void Wcon_WinPrint( const char *pMsg );
+void Wcon_SetStatus( const char *pStatus );
+#endif
 
 // text messages
 #define Msg	Con_Printf

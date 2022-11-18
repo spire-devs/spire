@@ -17,7 +17,6 @@ GNU General Public License for more details.
 #include "client.h"
 #include "net_encode.h"
 #include "entity_types.h"
-#include "gl_local.h"
 #include "pm_local.h"
 #include "cl_tent.h"
 #include "studio.h"
@@ -59,10 +58,13 @@ void CL_UpdatePositions( cl_entity_t *ent )
 
 	ent->current_position = (ent->current_position + 1) & HISTORY_MASK;
 	ph = &ent->ph[ent->current_position];
-
 	VectorCopy( ent->curstate.origin, ph->origin );
 	VectorCopy( ent->curstate.angles, ph->angles );
-	ph->animtime = ent->curstate.animtime;	// !!!
+
+	if( ent->model && ent->model->type == mod_brush )
+		ph->animtime = ent->curstate.animtime;
+	else
+		ph->animtime = cl.time;
 }
 
 /*
@@ -102,7 +104,7 @@ qboolean CL_EntityTeleported( cl_entity_t *ent )
 	VectorSubtract( ent->curstate.origin, ent->prevstate.origin, delta );
 
 	// compute potential max movement in units per frame and compare with entity movement
-	maxlen = ( clgame.movevars.maxvelocity * ( 1.0 / GAME_FPS ));
+	maxlen = ( clgame.movevars.maxvelocity * ( 1.0f / GAME_FPS ));
 	len = VectorLength( delta );
 
 	return (len > maxlen);
@@ -132,6 +134,9 @@ some ents will be ignore lerping
 */
 qboolean CL_EntityIgnoreLerp( cl_entity_t *e )
 {
+	if( cl_nointerp->value > 0.f )
+		return true;
+
 	if( e->model && e->model->type == mod_alias )
 		return false;
 
@@ -217,13 +222,44 @@ void CL_UpdateLatchedVars( cl_entity_t *ent )
 
 	if( ent->curstate.sequence != ent->prevstate.sequence )
 	{
-		memcpy( ent->prevstate.blending, ent->latched.prevseqblending, sizeof( ent->prevstate.blending ));
+		memcpy( ent->latched.prevseqblending, ent->prevstate.blending, sizeof( ent->latched.prevseqblending ));
 		ent->latched.prevsequence = ent->prevstate.sequence;
 		ent->latched.sequencetime = ent->curstate.animtime;
 	}
 
 	memcpy( ent->latched.prevcontroller, ent->prevstate.controller, sizeof( ent->latched.prevcontroller ));
 	memcpy( ent->latched.prevblending, ent->prevstate.blending, sizeof( ent->latched.prevblending ));
+
+	// update custom latched vars
+	if( clgame.drawFuncs.CL_UpdateLatchedVars != NULL )
+		clgame.drawFuncs.CL_UpdateLatchedVars( ent, false );
+}
+
+/*
+====================
+CL_GetStudioEstimatedFrame
+
+====================
+*/
+float CL_GetStudioEstimatedFrame( cl_entity_t *ent )
+{
+	studiohdr_t	*pstudiohdr;
+	mstudioseqdesc_t	*pseqdesc;
+	int		sequence;
+
+	if( ent->model != NULL && ent->model->type == mod_studio )
+	{
+		pstudiohdr = (studiohdr_t *)Mod_StudioExtradata( ent->model );
+
+		if( pstudiohdr )
+		{
+			sequence = bound( 0, ent->curstate.sequence, pstudiohdr->numseq - 1 );
+			pseqdesc = (mstudioseqdesc_t *)((byte *)pstudiohdr + pstudiohdr->seqindex) + sequence;
+			return ref.dllFuncs.R_StudioEstimateFrame( ent, pseqdesc );
+		}
+	}
+
+	return 0;
 }
 
 /*
@@ -254,6 +290,10 @@ void CL_ResetLatchedVars( cl_entity_t *ent, qboolean full_reset )
 	VectorCopy( ent->curstate.origin, ent->latched.prevorigin );
 	VectorCopy( ent->curstate.angles, ent->latched.prevangles );
 	ent->latched.prevsequence = ent->curstate.sequence;
+
+	// update custom latched vars
+	if( clgame.drawFuncs.CL_UpdateLatchedVars != NULL )
+		clgame.drawFuncs.CL_UpdateLatchedVars( ent, true );
 }
 
 /*
@@ -273,7 +313,7 @@ void CL_ProcessEntityUpdate( cl_entity_t *ent )
 	if( FBitSet( ent->curstate.entityType, ENTITY_NORMAL ))
 		COM_NormalizeAngles( ent->curstate.angles );
 
-	parametric = CL_ParametricMove( ent );
+	parametric = ent->curstate.starttime != 0.0f && ent->curstate.impacttime != 0.0f;
 
 	// allow interpolation on bmodels too
 	if( ent->model && ent->model->type == mod_brush )
@@ -289,7 +329,7 @@ void CL_ProcessEntityUpdate( cl_entity_t *ent )
 	}
 
 	// g-cont. it should be done for all the players?
-	if( ent->player && !FBitSet( host.features, ENGINE_COMPUTE_STUDIO_LERP )) 
+	if( ent->player && !FBitSet( host.features, ENGINE_COMPUTE_STUDIO_LERP ))
 		ent->curstate.angles[PITCH] /= -3.0f;
 
 	VectorCopy( ent->curstate.origin, ent->origin );
@@ -312,7 +352,7 @@ find two timestamps
 qboolean CL_FindInterpolationUpdates( cl_entity_t *ent, float targettime, position_history_t **ph0, position_history_t **ph1 )
 {
 	qboolean	extrapolate = true;
-	int	i, i0, i1, imod;
+	uint		i, i0, i1, imod;
 	float	at;
 
 	imod = ent->current_position;
@@ -322,7 +362,7 @@ qboolean CL_FindInterpolationUpdates( cl_entity_t *ent, float targettime, positi
 	for( i = 1; i < HISTORY_MAX - 1; i++ )
 	{
 		at = ent->ph[( imod - i ) & HISTORY_MASK].animtime;
-		if( at == 0.0 ) break;
+		if( at == 0.0f ) break;
 
 		if( targettime > at )
 		{
@@ -369,7 +409,7 @@ void CL_PureOrigin( cl_entity_t *ent, float t, vec3_t outorigin, vec3_t outangle
 
 		VectorSubtract( ph0->origin, ph1->origin, delta );
 
-		if( t0 != t1 )
+		if( !Q_equal( t0, t1 ))
 			frac = ( t - t1 ) / ( t0 - t1 );
 		else frac = 1.0f;
 
@@ -449,7 +489,9 @@ int CL_InterpolateModel( cl_entity_t *e )
 		return 0;
 	}
 
-	if( t2 == t1 )
+	// HACKHACK: workaround buggy position history animtime
+	// going backward sometimes
+	if( Q_equal( t2, t1 ) || t2 < t1 )
 	{
 		VectorCopy( ph0->origin, e->origin );
 		VectorCopy( ph0->angles, e->angles );
@@ -492,8 +534,15 @@ void CL_ComputePlayerOrigin( cl_entity_t *ent )
 	vec3_t	origin;
 	vec3_t	angles;
 
-	if( !ent->player || ent->index == ( cl.playernum + 1 ))
+	if( !ent->player )
 		return;
+
+	if( cl_nointerp->value > 0.f )
+	{
+		VectorCopy( ent->curstate.angles, ent->angles );
+		VectorCopy( ent->curstate.origin, ent->origin );
+		return;
+	}
 
 	if( cls.demoplayback == DEMO_QUAKE1 )
 	{
@@ -721,7 +770,10 @@ int CL_ParsePacketEntities( sizebuf_t *msg, qboolean delta )
 		CL_WriteDemoJumpTime();
 
 	// sentinel count. save it for debug checking
-	count = ( MSG_ReadUBitLong( msg, MAX_VISIBLE_PACKET_BITS ) + 1 );
+	if( cls.legacymode )
+		count = MSG_ReadWord( msg );
+	else count = MSG_ReadUBitLong( msg, MAX_VISIBLE_PACKET_BITS ) + 1;
+
 	newframe = &cl.frames[cl.parsecountmod];
 
 	// allocate parse entities
@@ -745,7 +797,7 @@ int CL_ParsePacketEntities( sizebuf_t *msg, qboolean delta )
 		}
 
 		if( subtracted >= CL_UPDATE_MASK )
-		{	
+		{
 			// we can't use this, it is too old
 			Con_NPrintf( 2, "^3Warning:^1 delta frame is too old^7\n" );
 			CL_FlushEntityPacket( msg );
@@ -795,15 +847,25 @@ int CL_ParsePacketEntities( sizebuf_t *msg, qboolean delta )
 
 	while( 1 )
 	{
-		newnum = MSG_ReadUBitLong( msg, MAX_ENTITY_BITS );
-		if( newnum == LAST_EDICT ) break; // end of packet entities
+		int lastedict;
+		if( cls.legacymode )
+		{
+			newnum = MSG_ReadWord( msg );
+			lastedict = 0;
+		}
+		else
+		{
+			newnum = MSG_ReadUBitLong( msg, MAX_ENTITY_BITS );
+			lastedict = LAST_EDICT;
+		}
 
+		if( newnum == lastedict ) break; // end of packet entities
 		if( MSG_CheckOverflow( msg ))
 			Host_Error( "CL_ParsePacketEntities: overflow\n" );
 		player = CL_IsPlayerIndex( newnum );
 
 		while( oldnum < newnum )
-		{	
+		{
 			// one or more entities from the old packet are unchanged
 			CL_DeltaEntity( msg, newframe, oldnum, oldent, false );
 			oldindex++;
@@ -820,7 +882,7 @@ int CL_ParsePacketEntities( sizebuf_t *msg, qboolean delta )
 		}
 
 		if( oldnum == newnum )
-		{	
+		{
 			// delta from previous state
 			bufStart = MSG_GetNumBytesRead( msg );
 			CL_DeltaEntity( msg, newframe, newnum, oldent, true );
@@ -840,7 +902,7 @@ int CL_ParsePacketEntities( sizebuf_t *msg, qboolean delta )
 		}
 
 		if( oldnum > newnum )
-		{	
+		{
 			// delta from baseline ?
 			bufStart = MSG_GetNumBytesRead( msg );
 			CL_DeltaEntity( msg, newframe, newnum, NULL, true );
@@ -851,7 +913,7 @@ int CL_ParsePacketEntities( sizebuf_t *msg, qboolean delta )
 
 	// any remaining entities in the old frame are copied over
 	while( oldnum != MAX_ENTNUMBER )
-	{	
+	{
 		// one or more entities from the old packet are unchanged
 		CL_DeltaEntity( msg, newframe, oldnum, oldent, false );
 		oldindex++;
@@ -881,10 +943,10 @@ int CL_ParsePacketEntities( sizebuf_t *msg, qboolean delta )
 
 	// first update is the final signon stage where we actually receive an entity (i.e., the world at least)
 	if( cls.signon == ( SIGNONS - 1 ))
-	{	
+	{
 		// we are done with signon sequence.
 		cls.signon = SIGNONS;
-		
+
 		// Clear loading plaque.
 		CL_SignonReply ();
 	}
@@ -921,27 +983,28 @@ qboolean CL_AddVisibleEntity( cl_entity_t *ent, int entityType )
 	}
 
 	// don't add the player in firstperson mode
-	if( RP_LOCALCLIENT( ent ) && !CL_IsThirdPerson( ) && ( ent->index == cl.viewentity ))
-		return false;
+	if( RP_LOCALCLIENT( ent ))
+	{
+		cl.local.apply_effects = true;
+
+		if( !CL_IsThirdPerson( ) && ( ent->index == cl.viewentity ))
+			return false;
+	}
 
 	if( entityType == ET_BEAM )
 	{
-		CL_AddCustomBeam( ent );
+		ref.dllFuncs.CL_AddCustomBeam( ent );
 		return true;
 	}
-	else if( !R_AddEntity( ent, entityType ))
+	else if( !ref.dllFuncs.R_AddEntity( ent, entityType ))
 	{
 		return false;
 	}
 
 	// because pTemp->entity.curstate.effects
 	// is already occupied by FTENT_FLICKER
-	if( entityType != ET_TEMPENTITY )
+	if( entityType != ET_TEMPENTITY && !RP_LOCALCLIENT( ent ) )
 	{
-		// no reason to do it twice
-		if( RP_LOCALCLIENT( ent ))
-			cl.local.apply_effects = false;
-
 		// apply client-side effects
 		CL_AddEntityEffects( ent );
 
@@ -993,7 +1056,6 @@ void CL_LinkPlayers( frame_t *frame )
 	// apply muzzleflash to weaponmodel
 	if( ent && FBitSet( ent->curstate.effects, EF_MUZZLEFLASH ))
 		SetBits( clgame.viewent.curstate.effects, EF_MUZZLEFLASH );
-	cl.local.apply_effects = true;
 
 	// check all the clients but add only visible
 	for( i = 0, state = frame->playerstate; i < MAX_CLIENTS; i++, state++ )
@@ -1032,6 +1094,9 @@ void CL_LinkPlayers( frame_t *frame )
 
 		if ( i == cl.playernum )
 		{
+			// using interpolation only for local player angles
+			CL_ComputePlayerOrigin( ent );
+
 			if( cls.demoplayback == DEMO_QUAKE1 )
 				VectorLerp( ent->prevstate.origin, cl.lerpFrac, ent->curstate.origin, cl.simorg );
 			VectorCopy( cl.simorg, ent->origin );
@@ -1101,7 +1166,7 @@ void CL_LinkPacketEntities( frame_t *frame )
 		if( ent->curstate.rendermode == kRenderNormal )
 		{
 			// auto 'solid' faces
-			if( FBitSet( ent->model->flags, MODEL_TRANSPARENT ) && CL_IsQuakeCompatible( ))
+			if( FBitSet( ent->model->flags, MODEL_TRANSPARENT ) && Host_IsQuakeCompatible( ))
 			{
 				ent->curstate.rendermode = kRenderTransAlpha;
 				ent->curstate.renderamt = 255;
@@ -1177,8 +1242,8 @@ void CL_LinkPacketEntities( frame_t *frame )
 
 			if( ent->model->type == mod_studio )
 			{
-				if( interpolate && FBitSet( host.features, ENGINE_COMPUTE_STUDIO_LERP )) 
-					R_StudioLerpMovement( ent, cl.time, ent->origin, ent->angles );
+				if( interpolate && FBitSet( host.features, ENGINE_COMPUTE_STUDIO_LERP ))
+					ref.dllFuncs.R_StudioLerpMovement( ent, cl.time, ent->origin, ent->angles );
 			}
 		}
 
@@ -1249,8 +1314,6 @@ void CL_EmitEntities( void )
 {
 	if( cl.paused ) return; // don't waste time
 
-	R_ClearScene ();
-
 	// not in server yet, no entities to redraw
 	if( cls.state != ca_active || !cl.validsequence )
 		return;
@@ -1260,7 +1323,7 @@ void CL_EmitEntities( void )
 		return;
 
 	// animate lightestyles
-	CL_RunLightStyles ();
+	ref.dllFuncs.CL_RunLightStyles ();
 
 	// decay dynamic lights
 	CL_DecayLights ();
@@ -1271,9 +1334,7 @@ void CL_EmitEntities( void )
 	// set client ideal pitch when mlook is disabled
 	CL_SetIdealPitch ();
 
-	// clear the scene befor start new frame
-	if( clgame.drawFuncs.R_ClearScene != NULL )
-		clgame.drawFuncs.R_ClearScene();
+	ref.dllFuncs.R_ClearScene ();
 
 	// link all the visible clients first
 	CL_LinkPlayers ( &cl.frames[cl.parsecountmod] );
@@ -1317,35 +1378,27 @@ qboolean CL_GetEntitySpatialization( channel_t *ch )
 
 	if(( ch->entnum - 1 ) == cl.playernum )
 	{
-		VectorCopy( RI.vieworg, ch->origin );
+		VectorCopy( refState.vieworg, ch->origin );
 		return true;
 	}
 
-	valid_origin = VectorIsNull( ch->origin ) ? false : true;          
+	valid_origin = VectorIsNull( ch->origin ) ? false : true;
 	ent = CL_GetEntityByIndex( ch->entnum );
 
 	// entity is not present on the client but has valid origin
-	if( !ent || !ent->index || ent->curstate.messagenum == 0 )
+	if( !ent || !ent->model || ent->curstate.messagenum != cl.parsecount )
 		return valid_origin;
-
-#if 0
-	// uncomment this if you want enable additional check by PVS
-	if( ent->curstate.messagenum != cl.parsecount )
-		return valid_origin;
-#endif
-	ch->movetype = ent->curstate.movetype;
 
 	// setup origin
-	VectorAverage( ent->curstate.mins, ent->curstate.maxs, ch->origin );
-	VectorAdd( ch->origin, ent->curstate.origin, ch->origin );
-
-	// setup mins\maxs
-	VectorAdd( ent->curstate.mins, ent->curstate.origin, ch->absmin );
-	VectorAdd( ent->curstate.maxs, ent->curstate.origin, ch->absmax );
-
-	// setup radius
-	if( ent->model != NULL && ent->model->radius ) ch->radius = ent->model->radius;
-	else ch->radius = RadiusFromBounds( ent->curstate.mins, ent->curstate.maxs );
+	if( ent->model->type == mod_brush )
+	{
+		VectorAverage( ent->model->mins, ent->model->maxs, ch->origin );
+		VectorAdd( ent->origin, ch->origin, ch->origin );
+	}
+	else
+	{
+		VectorCopy( ent->origin, ch->origin );
+	}
 
 	return true;
 }
@@ -1355,7 +1408,7 @@ qboolean CL_GetMovieSpatialization( rawchan_t *ch )
 	cl_entity_t	*ent;
 	qboolean		valid_origin;
 
-	valid_origin = VectorIsNull( ch->origin ) ? false : true;          
+	valid_origin = VectorIsNull( ch->origin ) ? false : true;
 	ent = CL_GetEntityByIndex( ch->entnum );
 
 	// entity is not present on the client but has valid origin
@@ -1363,12 +1416,15 @@ qboolean CL_GetMovieSpatialization( rawchan_t *ch )
 		return valid_origin;
 
 	// setup origin
-	VectorAverage( ent->curstate.mins, ent->curstate.maxs, ch->origin );
-	VectorAdd( ch->origin, ent->curstate.origin, ch->origin );
-
-	// setup radius
-	if( ent->model != NULL && ent->model->radius ) ch->radius = ent->model->radius;
-	else ch->radius = RadiusFromBounds( ent->curstate.mins, ent->curstate.maxs );
+	if( ent->model->type == mod_brush )
+	{
+		VectorAverage( ent->model->mins, ent->model->maxs, ch->origin );
+		VectorAdd( ent->origin, ch->origin, ch->origin );
+	}
+	else
+	{
+		VectorCopy( ent->origin, ch->origin );
+	}
 
 	return true;
 }

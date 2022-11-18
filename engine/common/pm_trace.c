@@ -14,11 +14,11 @@ GNU General Public License for more details.
 */
 
 #include "common.h"
-#include "mathlib.h"
+#include "xash3d_mathlib.h"
 #include "mod_local.h"
 #include "pm_local.h"
 #include "pm_movevars.h"
-#include "features.h"
+#include "enginefeatures.h"
 #include "studio.h"
 #include "world.h"
 
@@ -75,18 +75,18 @@ void PM_InitBoxHull( void )
 	for( i = 0; i < 6; i++ )
 	{
 		pm_boxclipnodes[i].planenum = i;
-		
+
 		side = i & 1;
-		
+
 		pm_boxclipnodes[i].children[side] = CONTENTS_EMPTY;
 		if( i != 5 ) pm_boxclipnodes[i].children[side^1] = i + 1;
 		else pm_boxclipnodes[i].children[side^1] = CONTENTS_SOLID;
-		
+
 		pm_boxplanes[i].type = i>>1;
 		pm_boxplanes[i].normal[i>>1] = 1.0f;
 		pm_boxplanes[i].signbits = 0;
 	}
-	
+
 }
 
 /*
@@ -111,9 +111,17 @@ hull_t *PM_HullForBox( const vec3_t mins, const vec3_t maxs )
 
 void PM_ConvertTrace( trace_t *out, pmtrace_t *in, edict_t *ent )
 {
-	memcpy( out, in, 48 ); // matched
+	out->allsolid = in->allsolid;
+	out->startsolid = in->startsolid;
+	out->inopen = in->inopen;
+	out->inwater = in->inwater;
+	out->fraction = in->fraction;
+	out->plane.dist = in->plane.dist;
 	out->hitgroup = in->hitgroup;
 	out->ent = ent;
+
+	VectorCopy( in->endpos, out->endpos );
+	VectorCopy( in->plane.normal, out->plane.normal );
 }
 
 /*
@@ -231,7 +239,7 @@ loc0:
 
 	if( num < hull->firstclipnode || num > hull->lastclipnode )
 		Host_Error( "PM_RecursiveHullCheck: bad node number %i\n", num );
-		
+
 	// find the point distances
 	node = hull->clipnodes + num;
 	plane = hull->planes + node->planenum;
@@ -259,7 +267,7 @@ loc0:
 
 	if( frac < 0.0f ) frac = 0.0f;
 	if( frac > 1.0f ) frac = 1.0f;
-		
+
 	midf = p1f + ( p2f - p1f ) * frac;
 	VectorLerp( p1, frac, p2, mid );
 
@@ -272,12 +280,12 @@ loc0:
 	{
 		// go past the node
 		return PM_RecursiveHullCheck( hull, node->children[side^1], midf, p2f, mid, p2, trace );
-	}	
+	}
 
 	// never got out of the solid area
 	if( trace->allsolid )
 		return false;
-		
+
 	// the other side of the node is solid, this is the impact point
 	if( !side )
 	{
@@ -391,7 +399,7 @@ pmtrace_t PM_PlayerTraceExt( playermove_t *pmove, vec3_t start, vec3_t end, int 
 					hull = PM_HullForBox( mins, maxs );
 					VectorCopy( pe->origin, offset );
 				}
-			}			
+			}
 			else
 			{
 				VectorSubtract( pe->mins, pmove->player_maxs[pmove->usehull], mins );
@@ -423,7 +431,7 @@ pmtrace_t PM_PlayerTraceExt( playermove_t *pmove, vec3_t start, vec3_t end, int 
 
 			Matrix4x4_VectorITransform( matrix, start, start_l );
 			Matrix4x4_VectorITransform( matrix, end, end_l );
-                              
+
 			if( transform_bbox )
 			{
 				World_TransformAABB( matrix, pmove->player_mins[pmove->usehull], pmove->player_maxs[pmove->usehull], mins, maxs );
@@ -446,10 +454,7 @@ pmtrace_t PM_PlayerTraceExt( playermove_t *pmove, vec3_t start, vec3_t end, int 
 			VectorSubtract( end, offset, end_l );
 		}
 
-		memset( &trace_bbox, 0, sizeof( trace_bbox ));
-		VectorCopy( end, trace_bbox.endpos );
-		trace_bbox.allsolid = true;
-		trace_bbox.fraction = 1.0f;
+		PM_InitPMTrace( &trace_bbox, end );
 
 		if( hullcount < 1 )
 		{
@@ -461,7 +466,9 @@ pmtrace_t PM_PlayerTraceExt( playermove_t *pmove, vec3_t start, vec3_t end, int 
 			// run custom sweep callback
 			if( pmove->server || Host_IsLocalClient( ))
 				SV_ClipPMoveToEntity( pe, start, mins, maxs, end, &trace_bbox );
+#if !XASH_DEDICATED
 			else CL_ClipPMoveToEntity( pe, start, mins, maxs, end, &trace_bbox );
+#endif
 		}
 		else if( hullcount == 1 )
 		{
@@ -473,10 +480,7 @@ pmtrace_t PM_PlayerTraceExt( playermove_t *pmove, vec3_t start, vec3_t end, int 
 
 			for( last_hitgroup = 0, j = 0; j < hullcount; j++ )
 			{
-				memset( &trace_hitbox, 0, sizeof( trace_hitbox ));
-				VectorCopy( end, trace_hitbox.endpos );
-				trace_hitbox.allsolid = true;
-				trace_hitbox.fraction = 1.0f;
+				PM_InitPMTrace( &trace_hitbox, end );
 
 				PM_RecursiveHullCheck( &hull[j], hull[j].firstclipnode, 0, 1, start_l, end_l, &trace_hitbox );
 
@@ -589,14 +593,14 @@ int PM_TestPlayerPosition( playermove_t *pmove, vec3_t pos, pmtrace_t *ptrace, p
 			{
 				if(( check_angles( pe->angles[0] ) || check_angles( pe->angles[2] )) && pmove->usehull != 2 )
 					transform_bbox = true;
-                              }
+			}
 
 			if( transform_bbox )
 				Matrix4x4_CreateFromEntity( matrix, pe->angles, pe->origin, 1.0f );
 			else Matrix4x4_CreateFromEntity( matrix, pe->angles, offset, 1.0f );
 
 			Matrix4x4_VectorITransform( matrix, pos, pos_l );
-                              
+
 			if( transform_bbox )
 			{
 				World_TransformAABB( matrix, pmove->player_mins[pmove->usehull], pmove->player_maxs[pmove->usehull], mins, maxs );
@@ -620,15 +624,14 @@ int PM_TestPlayerPosition( playermove_t *pmove, vec3_t pos, pmtrace_t *ptrace, p
 		{
 			pmtrace_t	trace;
 
-			memset( &trace, 0, sizeof( trace ));
-			VectorCopy( pos, trace.endpos );
-			trace.allsolid = true;
-			trace.fraction = 1.0f;
+			PM_InitPMTrace( &trace, pos );
 
 			// run custom sweep callback
 			if( pmove->server || Host_IsLocalClient( ))
 				SV_ClipPMoveToEntity( pe, pos, mins, maxs, pos, &trace );
+#if !XASH_DEDICATED
 			else CL_ClipPMoveToEntity( pe, pos, mins, maxs, pos, &trace );
+#endif
 
 			// if we inside the custom hull
 			if( trace.allsolid )
@@ -650,4 +653,82 @@ int PM_TestPlayerPosition( playermove_t *pmove, vec3_t pos, pmtrace_t *ptrace, p
 	}
 
 	return -1; // didn't hit anything
+}
+
+/*
+=============
+PM_TruePointContents
+
+=============
+*/
+int PM_TruePointContents( playermove_t *pmove, const vec3_t p )
+{
+	hull_t	*hull = &pmove->physents[0].model->hulls[0];
+
+	if( hull )
+	{
+		return PM_HullPointContents( hull, hull->firstclipnode, p );
+	}
+	else
+	{
+		return CONTENTS_EMPTY;
+	}
+}
+
+/*
+=============
+PM_PointContents
+
+=============
+*/
+int PM_PointContents( playermove_t *pmove, const vec3_t p )
+{
+	int	i, contents;
+	hull_t	*hull;
+	vec3_t	test;
+	physent_t	*pe;
+
+	// sanity check
+	if( !p || !pmove->physents[0].model )
+		return CONTENTS_NONE;
+
+	// get base contents from world
+	contents = PM_HullPointContents( &pmove->physents[0].model->hulls[0], 0, p );
+
+	for( i = 1; i < pmove->numphysent; i++ )
+	{
+		pe = &pmove->physents[i];
+
+		if( pe->solid != SOLID_NOT ) // disabled ?
+			continue;
+
+		// only brushes can have special contents
+		if( !pe->model ) continue;
+
+		// check water brushes accuracy
+		hull = &pe->model->hulls[0];
+
+		if( FBitSet( pe->model->flags, MODEL_HAS_ORIGIN ) && !VectorIsNull( pe->angles ))
+		{
+			matrix4x4	matrix;
+
+			Matrix4x4_CreateFromEntity( matrix, pe->angles, pe->origin, 1.0f );
+			Matrix4x4_VectorITransform( matrix, p, test );
+		}
+		else
+		{
+			// offset the test point appropriately for this hull.
+			VectorSubtract( p, pe->origin, test );
+		}
+
+		// test hull for intersection with this model
+		if( PM_HullPointContents( hull, hull->firstclipnode, test ) == CONTENTS_EMPTY )
+			continue;
+
+		// compare contents ranking
+		if( RankForContents( pe->skin ) > RankForContents( contents ))
+			contents = pe->skin; // new content has more priority
+	}
+
+	return contents;
 }

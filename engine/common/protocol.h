@@ -30,7 +30,7 @@ GNU General Public License for more details.
 #define svc_print			8	// [byte] id [string] null terminated string
 #define svc_stufftext		9	// [string] stuffed into client's console buffer
 #define svc_setangle		10	// [angle angle angle] set the view angle to this absolute value
-#define svc_serverdata		11	// [long] protocol ...
+#define svc_serverdata		11	// [int] protocol ...
 #define svc_lightstyle		12	// [index][pattern][float]
 #define svc_updateuserinfo		13	// [byte] playernum, [string] userinfo
 #define svc_deltatable		14	// [table header][...]
@@ -60,7 +60,7 @@ GNU General Public License for more details.
 #define svc_addangle		38	// [angle] add angles when client turn on mover
 #define svc_usermessage		39	// [byte][byte][string] REG_USER_MSG stuff
 #define svc_packetentities		40	// [short][...]
-#define svc_deltapacketentities	41	// [short][byte][...] 
+#define svc_deltapacketentities	41	// [short][byte][...]
 #define svc_choke			42	// just event
 #define svc_resourcelist		43	// [short][...]
 #define svc_deltamovevars		44	// [movevars_t]
@@ -73,16 +73,17 @@ GNU General Public License for more details.
 #define svc_director		51	// <variable sized>
 #define svc_voiceinit		52	// <see code>
 #define svc_voicedata		53	// [byte][short][...]
-#define svc_deltapacketbones		54	// [short][byte][...] 
+#define svc_deltapacketbones		54	// [short][byte][...]
 // reserved
 #define svc_resourcelocation		56	// [string]
 #define svc_querycvarvalue		57	// [string]
-#define svc_querycvarvalue2		58	// [string][long] (context)
-#define svc_lastmsg			58	// start user messages at this point
+#define svc_querycvarvalue2		58	// [string][int] (context)
+#define svc_exec				59	// [byte][...]
+#define svc_lastmsg			59	// start user messages at this point
 
 // client to server
 #define clc_bad			0	// immediately drop client when received
-#define clc_nop			1 		
+#define clc_nop			1
 #define clc_move			2	// [[usercmd_t]
 #define clc_stringcmd		3	// [string] message
 #define clc_delta			4	// [byte] sequence number, requests delta compression of message
@@ -109,21 +110,18 @@ GNU General Public License for more details.
 #define MAX_EVENTS			(1<<MAX_EVENT_BITS)	// 10 bits == 1024 events (the original Half-Life limit)
 
 #define MAX_MODEL_BITS		12		// 12 bits == 4096 models
-#define MAX_SUPPORTED_MODELS		(1<<MAX_MODEL_BITS)
-
-#ifdef SUPPORT_BSP2_FORMAT
-#define MAX_MODELS			MAX_SUPPORTED_MODELS	// because BSP2 contain too much embedded bsp-models
-#else
-#define MAX_MODELS			1024		// g-cont. reduce the memory without breaking proto
-#endif
+#define MAX_MODELS			(1<<MAX_MODEL_BITS)
 
 #define MAX_SOUND_BITS		11
 #define MAX_SOUNDS			(1<<MAX_SOUND_BITS)	// 11 bits == 2048 sounds
+#define MAX_SOUNDS_NONSENTENCE MAX_SOUNDS
 
 #define MAX_ENTITY_BITS		13		// 13 bits = 8192 edicts
 #define MAX_EDICTS			(1<<MAX_ENTITY_BITS)
 #define MAX_EDICTS_BYTES		((MAX_EDICTS + 7) / 8)
 #define LAST_EDICT			(MAX_EDICTS - 1)
+
+#define MIN_EDICTS			64
 
 #define MAX_CUSTOM_BITS		10
 #define MAX_CUSTOM			(1<<MAX_CUSTOM_BITS)// 10 bits == 1024 generic file
@@ -174,17 +172,56 @@ GNU General Public License for more details.
 
 #define MAX_RESOURCES		(MAX_MODELS+MAX_SOUNDS+MAX_CUSTOM+MAX_EVENTS)
 #define MAX_RESOURCE_BITS		13	// 13 bits 8192 resource (4096 models + 2048 sounds + 1024 events + 1024 files)
-
-#define FRAGMENT_MIN_SIZE		1200		// default MTU
+#define	FRAGMENT_MIN_SIZE			508		// RFC 791: 576(min ip packet) - 60 (ip header) - 8 (udp header)
+#define FRAGMENT_DEFAULT_SIZE		1200		// default MTU
 #define FRAGMENT_MAX_SIZE		64000		// maximal fragment size
 #define FRAGMENT_LOCAL_SIZE		FRAGMENT_MAX_SIZE	// local connection
+
+#if XASH_LOW_MEMORY == 2
+#undef MAX_VISIBLE_PACKET
+#undef MAX_VISIBLE_PACKET_VIS_BYTES
+#undef MAX_EVENTS
+#undef MAX_MODELS
+#undef MAX_SOUNDS
+#undef MAX_CUSTOM
+#undef MAX_DLIGHTS
+#undef MAX_ELIGHTS
+#undef MAX_RENDER_DECALS
+#undef MAX_RESOURCES
+// memory reduced protocol, not for use in multiplayer (but still compatible)
+#define MAX_VISIBLE_PACKET		128
+#define MAX_VISIBLE_PACKET_VIS_BYTES	((MAX_VISIBLE_PACKET + 7) / 8)
+#define MAX_EVENTS			128
+#define MAX_MODELS			512
+#define MAX_SOUNDS			512
+#define MAX_CUSTOM			32
+#define MAX_DLIGHTS			16		// dynamic lights (rendered per one frame)
+#define MAX_ELIGHTS			32		// entity only point lights
+#define MAX_RENDER_DECALS		64		// max rendering decals per a level
+#define MAX_RESOURCES		1024
+#elif XASH_LOW_MEMORY == 1
+#undef MAX_VISIBLE_PACKET
+#undef MAX_VISIBLE_PACKET_VIS_BYTES
+#undef MAX_EVENTS
+#undef MAX_MODELS
+#undef MAX_CUSTOM
+#undef MAX_RENDER_DECALS
+#undef MAX_RESOURCES
+#define MAX_VISIBLE_PACKET		256
+#define MAX_VISIBLE_PACKET_VIS_BYTES	((MAX_VISIBLE_PACKET + 7) / 8)
+#define MAX_EVENTS			128
+#define MAX_MODELS			1024
+#define MAX_CUSTOM			512
+#define MAX_RENDER_DECALS	128
+#define MAX_RESOURCES		1024
+#endif
 
 // Quake1 Protocol
 #define PROTOCOL_VERSION_QUAKE	15
 
 // listed only unmatched ops
-#define svc_updatestat		3	// [byte] [long]			(svc_event)
-#define svc_version			4	// [long] server version		(svc_changing)
+#define svc_updatestat		3	// [byte] [int]			(svc_event)
+#define svc_version			4	// [int] server version		(svc_changing)
 #define svc_updatename		13	// [byte] [string]			(svc_updateuserinfo)
 #define svc_updatefrags		14	// [byte] [short]			(svc_deltatable)
 #define svc_stopsound		16	// <see code>			(svc_resource)
@@ -242,5 +279,26 @@ GNU General Public License for more details.
 
 extern const char	*svc_strings[svc_lastmsg+1];
 extern const char	*clc_strings[clc_lastmsg+1];
+
+// FWGS extensions
+#define NET_EXT_SPLITSIZE (1U<<0) // set splitsize by cl_dlmax
+
+// legacy protocol definitons
+#define PROTOCOL_LEGACY_VERSION		48
+#define svc_legacy_modelindex		31	// [index][modelpath]
+#define svc_legacy_soundindex		28	// [index][soundpath]
+#define svc_legacy_eventindex		34	// [index][eventname]
+#define svc_legacy_ambientsound		29
+#define svc_legacy_chokecount 42		// old client specified count, new just sends svc_choke
+#define svc_legacy_event			27	// playback event queue
+#define svc_legacy_changing			3	// changelevel by server request
+
+#define clc_legacy_userinfo		6	// [[userinfo string]
+
+#define SND_LEGACY_LARGE_INDEX		(1<<2)	// a send sound as short
+#define MAX_LEGACY_ENTITY_BITS		12
+#define MAX_LEGACY_WEAPON_BITS		5
+#define MAX_LEGACY_MODEL_BITS 11
+#define MAX_LEGACY_TOTAL_CMDS 28 // magic number from old engine's sv_client.c
 
 #endif//NET_PROTOCOL_H

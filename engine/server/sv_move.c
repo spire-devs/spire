@@ -14,7 +14,7 @@ GNU General Public License for more details.
 */
 
 #include "common.h"
-#include "mathlib.h"
+#include "xash3d_mathlib.h"
 #include "server.h"
 #include "const.h"
 #include "pm_defs.h"
@@ -243,7 +243,7 @@ float SV_VecToYaw( const vec3_t src )
 	}
 	else
 	{
-		yaw = (int)( atan2( src[1], src[0] ) * 180.0f / M_PI );
+		yaw = (int)( atan2( src[1], src[0] ) * 180.0 / M_PI );
 		if( yaw < 0 ) yaw += 360.0f;
 	}
 	return yaw;

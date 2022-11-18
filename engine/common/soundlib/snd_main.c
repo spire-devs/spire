@@ -59,7 +59,7 @@ wavdata_t *FS_LoadSound( const char *filename, const byte *buffer, size_t size )
 	const char	*ext = COM_FileExtension( filename );
 	string		path, loadname;
 	qboolean		anyformat = true;
-	int		filesize = 0;
+	fs_offset_t		filesize = 0;
 	const loadwavfmt_t	*format;
 	byte		*f;
 
@@ -99,7 +99,7 @@ wavdata_t *FS_LoadSound( const char *filename, const byte *buffer, size_t size )
 					Mem_Free(f); // release buffer
 					return SoundPack(); // loaded
 				}
-				else Mem_Free(f); // release buffer 
+				else Mem_Free(f); // release buffer
 			}
 		}
 	}
@@ -141,7 +141,7 @@ void FS_FreeSound( wavdata_t *pack )
 ================
 FS_OpenStream
 
-open and reading basic info from sound stream 
+open and reading basic info from sound stream
 ================
 */
 stream_t *FS_OpenStream( const char *filename )
@@ -207,7 +207,7 @@ wavdata_t *FS_StreamInfo( stream_t *stream )
 	info.rate = stream->rate;
 	info.width = stream->width;
 	info.channels = stream->channels;
-	info.flags = SOUND_STREAM; 
+	info.flags = SOUND_STREAM;
 	info.size = stream->size;
 	info.buffer = NULL;
 	info.samples = 0;	// not actual for streams
@@ -223,7 +223,7 @@ FS_ReadStream
 extract stream as wav-data and put into buffer, move file pointer
 ================
 */
-long FS_ReadStream( stream_t *stream, int bytes, void *buffer )
+int FS_ReadStream( stream_t *stream, int bytes, void *buffer )
 {
 	if( !stream || !stream->format || !stream->format->readfunc )
 		return 0;
@@ -241,7 +241,7 @@ FS_GetStreamPos
 get stream position (in bytes)
 ================
 */
-long FS_GetStreamPos( stream_t *stream )
+int FS_GetStreamPos( stream_t *stream )
 {
 	if( !stream || !stream->format || !stream->format->getposfunc )
 		return -1;
@@ -256,7 +256,7 @@ FS_SetStreamPos
 set stream position (in bytes)
 ================
 */
-long FS_SetStreamPos( stream_t *stream, long newpos )
+int FS_SetStreamPos( stream_t *stream, int newpos )
 {
 	if( !stream || !stream->format || !stream->format->setposfunc )
 		return -1;
@@ -278,3 +278,25 @@ void FS_FreeStream( stream_t *stream )
 
 	stream->format->freefunc( stream );
 }
+
+#if XASH_ENGINE_TESTS
+
+#define IMPLEMENT_SOUNDLIB_FUZZ_TARGET( export, target ) \
+int EXPORT export( const uint8_t *Data, size_t Size ) \
+{ \
+	wavdata_t *wav; \
+	host.type = HOST_NORMAL; \
+	Memory_Init(); \
+	Sound_Init(); \
+	if( target( "#internal", Data, Size )) \
+	{ \
+		wav = SoundPack(); \
+		FS_FreeSound( wav ); \
+	} \
+	Sound_Shutdown(); \
+	return 0; \
+} \
+
+IMPLEMENT_SOUNDLIB_FUZZ_TARGET( Fuzz_Sound_LoadMPG, Sound_LoadMPG )
+IMPLEMENT_SOUNDLIB_FUZZ_TARGET( Fuzz_Sound_LoadWAV, Sound_LoadWAV )
+#endif

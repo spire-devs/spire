@@ -56,7 +56,7 @@ void S_SoundList_f( void )
 			else Con_Printf( " " );
 			if( sfx->name[0] == '*' )
 				Con_Printf( " (%2db) %s : %s\n", sc->width * 8, Q_memprint( sc->size ), sfx->name );
-			else Con_Printf( " (%2db) %s : %s%s\n", sc->width * 8, Q_memprint( sc->size ), DEFAULT_SOUNDPATH, sfx->name );
+			else Con_Printf( " (%2db) %s : " DEFAULT_SOUNDPATH "%s\n", sc->width * 8, Q_memprint( sc->size ), sfx->name );
 			totalSfx++;
 		}
 	}
@@ -141,6 +141,9 @@ wavdata_t *S_LoadSound( sfx_t *sfx )
 	if( Q_stricmp( sfx->name, "*default" ))
 	{
 		// load it from disk
+		if( s_warn_late_precache.value > 0 && CL_Active() )
+			Con_Printf( S_WARN "S_LoadSound: late precache of %s\n", sfx->name );
+
 		if( sfx->name[0] == '*' )
 			sc = FS_LoadSound( sfx->name + 1, NULL, 0 );
 		else sc = FS_LoadSound( sfx->name, NULL, 0 );
@@ -211,7 +214,7 @@ sfx_t *S_FindName( const char *pname, int *pfInCache )
 			return NULL;
 		s_numSfx++;
 	}
-	
+
 	sfx = &s_knownSfx[i];
 	memset( sfx, 0, sizeof( *sfx ));
 	if( pfInCache ) *pfInCache = false;
@@ -222,7 +225,7 @@ sfx_t *S_FindName( const char *pname, int *pfInCache )
 	// link it in
 	sfx->hashNext = s_sfxHashList[sfx->hashValue];
 	s_sfxHashList[sfx->hashValue] = sfx;
-		
+
 	return sfx;
 }
 
@@ -299,7 +302,7 @@ void S_EndRegistration( void )
 
 	if( !s_registering || !dma.initialized )
 		return;
-	
+
 	// free any sounds not from this registration sequence
 	for( i = 0, sfx = s_knownSfx; i < s_numSfx; i++, sfx++ )
 	{

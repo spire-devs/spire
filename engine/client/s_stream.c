@@ -45,7 +45,7 @@ S_FadeMusicVolume
 */
 void S_FadeMusicVolume( float fadePercent )
 {
-	musicfade.percent = bound( 0.0f, fadePercent, 100.0f );       
+	musicfade.percent = bound( 0.0f, fadePercent, 100.0f );
 }
 
 /*
@@ -63,7 +63,7 @@ float S_GetMusicVolume( void )
 		scale = 1.0f - scale;
 	}
 
-	return s_musicvolume->value * scale;
+	return s_musicvolume.value * scale;
 }
 
 /*
@@ -71,7 +71,7 @@ float S_GetMusicVolume( void )
 S_StartBackgroundTrack
 =================
 */
-void S_StartBackgroundTrack( const char *introTrack, const char *mainTrack, long position, qboolean fullpath )
+void S_StartBackgroundTrack( const char *introTrack, const char *mainTrack, int position, qboolean fullpath )
 {
 	S_StopBackgroundTrack();
 
@@ -183,7 +183,7 @@ void S_StreamBackgroundTrack( void )
 		return;
 
 	// don't bother playing anything if musicvolume is 0
-	if( !s_musicvolume->value || s_listener.paused || s_listener.stream_paused )
+	if( !s_musicvolume.value || s_listener.paused || s_listener.stream_paused )
 		return;
 
 	if( !cl.background )

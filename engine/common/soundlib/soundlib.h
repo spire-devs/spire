@@ -25,7 +25,7 @@ typedef struct loadwavfmt_s
 {
 	const char *formatstring;
 	const char *ext;
-	qboolean (*loadfunc)( const char *name, const byte *buffer, size_t filesize );
+	qboolean (*loadfunc)( const char *name, const byte *buffer, fs_offset_t filesize );
 } loadwavfmt_t;
 
 typedef struct streamfmt_s
@@ -34,9 +34,9 @@ typedef struct streamfmt_s
 	const char *ext;
 
 	stream_t *(*openfunc)( const char *filename );
-	long (*readfunc)( stream_t *stream, long bytes, void *buffer );
-	long (*setposfunc)( stream_t *stream, long newpos );
-	long (*getposfunc)( stream_t *stream );
+	int (*readfunc)( stream_t *stream, int bytes, void *buffer );
+	int (*setposfunc)( stream_t *stream, int newpos );
+	int (*getposfunc)( stream_t *stream );
 	void (*freefunc)( stream_t *stream );
 } streamfmt_t;
 
@@ -60,7 +60,7 @@ typedef struct sndlib_s
 	int		cmd_flags;
 } sndlib_t;
 
-typedef struct stream_s
+struct stream_s
 {
 	const streamfmt_t	*format;	// streamformat to operate
 
@@ -94,44 +94,44 @@ typedef struct stream_s
 
 typedef struct
 {
-	int	riff_id;		// 'RIFF' 
-	long	rLen;
-	int	wave_id;		// 'WAVE' 
-	int	fmt_id;		// 'fmt ' 
-	long	pcm_header_len;	// varies... 
-	short	wFormatTag;
-	short	nChannels;	// 1,2 for stereo data is (l,r) pairs 
-	long	nSamplesPerSec;
-	long	nAvgBytesPerSec;
-	short	nBlockAlign;      
-	short	nBitsPerSample;
+	int32_t	riff_id;		// 'RIFF'
+	int32_t	rLen;
+	int32_t	wave_id;		// 'WAVE'
+	int32_t	fmt_id;		// 'fmt '
+	int32_t	pcm_header_len;	// varies...
+	int16_t	wFormatTag;
+	int16_t	nChannels;	// 1,2 for stereo data is (l,r) pairs
+	int32_t	nSamplesPerSec;
+	int32_t	nAvgBytesPerSec;
+	int16_t	nBlockAlign;
+	int16_t	nBitsPerSample;
 } wavehdr_t;
 
 typedef struct
 {
-	int	data_id;		// 'data' or 'fact' 
-	long	dLen;
+	int32_t	data_id;		// 'data' or 'fact'
+	int32_t	dLen;
 } chunkhdr_t;
 
 extern sndlib_t sound;
 //
 // formats load
 //
-qboolean Sound_LoadWAV( const char *name, const byte *buffer, size_t filesize );
-qboolean Sound_LoadMPG( const char *name, const byte *buffer, size_t filesize );
+qboolean Sound_LoadWAV( const char *name, const byte *buffer, fs_offset_t filesize );
+qboolean Sound_LoadMPG( const char *name, const byte *buffer, fs_offset_t filesize );
 
 //
 // stream operate
 //
 stream_t *Stream_OpenWAV( const char *filename );
-long Stream_ReadWAV( stream_t *stream, long bytes, void *buffer );
-long Stream_SetPosWAV( stream_t *stream, long newpos );
-long Stream_GetPosWAV( stream_t *stream );
+int Stream_ReadWAV( stream_t *stream, int bytes, void *buffer );
+int Stream_SetPosWAV( stream_t *stream, int newpos );
+int Stream_GetPosWAV( stream_t *stream );
 void Stream_FreeWAV( stream_t *stream );
 stream_t *Stream_OpenMPG( const char *filename );
-long Stream_ReadMPG( stream_t *stream, long bytes, void *buffer );
-long Stream_SetPosMPG( stream_t *stream, long newpos );
-long Stream_GetPosMPG( stream_t *stream );
+int Stream_ReadMPG( stream_t *stream, int bytes, void *buffer );
+int Stream_SetPosMPG( stream_t *stream, int newpos );
+int Stream_GetPosMPG( stream_t *stream );
 void Stream_FreeMPG( stream_t *stream );
 
 #endif//SOUNDLIB_H

@@ -15,7 +15,6 @@ GNU General Public License for more details.
 
 #include "common.h"
 #include "client.h"
-#include "gl_local.h"
 
 /*
 ====================
@@ -127,8 +126,8 @@ void CL_PlayCDTrack_f( void )
 		int	i, maxTrack;
 
 		for( maxTrack = i = 0; i < MAX_CDTRACKS; i++ )
-			if( Q_strlen( clgame.cdtracks[i] )) maxTrack++;
-			
+			if( COM_CheckStringEmpty( clgame.cdtracks[i] ) ) maxTrack++;
+
 		Con_Printf( "%u tracks\n", maxTrack );
 		if( track )
 		{
@@ -141,43 +140,31 @@ void CL_PlayCDTrack_f( void )
 	else Con_Printf( "%s: unknown command %s\n", Cmd_Argv( 0 ), command );
 }
 
-/* 
-================== 
+/*
+==================
 CL_ScreenshotGetName
-================== 
-*/  
+==================
+*/
 qboolean CL_ScreenshotGetName( int lastnum, char *filename )
 {
-	int	a, b, c, d;
-
 	if( lastnum < 0 || lastnum > 9999 )
 	{
 		Con_Printf( S_ERROR "unable to write screenshot\n" );
 		return false;
 	}
 
-	a = lastnum / 1000;
-	lastnum -= a * 1000;
-	b = lastnum / 100;
-	lastnum -= b * 100;
-	c = lastnum / 10;
-	lastnum -= c * 10;
-	d = lastnum;
-
-	Q_sprintf( filename, "scrshots/%s_shot%i%i%i%i.bmp", clgame.mapname, a, b, c, d );
+	Q_sprintf( filename, "scrshots/%s_shot%04d.png", clgame.mapname, lastnum );
 
 	return true;
 }
 
-/* 
-================== 
+/*
+==================
 CL_SnapshotGetName
-================== 
-*/  
+==================
+*/
 qboolean CL_SnapshotGetName( int lastnum, char *filename )
 {
-	int	a, b, c, d;
-
 	if( lastnum < 0 || lastnum > 9999 )
 	{
 		Con_Printf( S_ERROR "unable to write snapshot\n" );
@@ -185,34 +172,26 @@ qboolean CL_SnapshotGetName( int lastnum, char *filename )
 		return false;
 	}
 
-	a = lastnum / 1000;
-	lastnum -= a * 1000;
-	b = lastnum / 100;
-	lastnum -= b * 100;
-	c = lastnum / 10;
-	lastnum -= c * 10;
-	d = lastnum;
-
-	Q_sprintf( filename, "../%s_%i%i%i%i.bmp", clgame.mapname, a, b, c, d );
+	Q_sprintf( filename, "../%s_%04d.png", clgame.mapname, lastnum );
 
 	return true;
 }
 
-/* 
-============================================================================== 
- 
-			SCREEN SHOTS 
- 
-============================================================================== 
+/*
+==============================================================================
+
+			SCREEN SHOTS
+
+==============================================================================
 */
-/* 
-================== 
+/*
+==================
 CL_ScreenShot_f
 
 normal screenshot
-================== 
+==================
 */
-void CL_ScreenShot_f( void ) 
+void CL_ScreenShot_f( void )
 {
 	int	i;
 	string	checkname;
@@ -243,14 +222,14 @@ void CL_ScreenShot_f( void )
 	cls.envshot_viewsize = 0;
 }
 
-/* 
-================== 
+/*
+==================
 CL_SnapShot_f
 
 save screenshots into root dir
-================== 
+==================
 */
-void CL_SnapShot_f( void ) 
+void CL_SnapShot_f( void )
 {
 	int	i;
 	string	checkname;
@@ -284,12 +263,12 @@ void CL_SnapShot_f( void )
 	cls.envshot_viewsize = 0;
 }
 
-/* 
-================== 
+/*
+==================
 CL_EnvShot_f
 
 cubemap view
-================== 
+==================
 */
 void CL_EnvShot_f( void )
 {
@@ -305,12 +284,12 @@ void CL_EnvShot_f( void )
 	cls.envshot_viewsize = 0;
 }
 
-/* 
-================== 
+/*
+==================
 CL_SkyShot_f
 
 skybox view
-================== 
+==================
 */
 void CL_SkyShot_f( void )
 {
@@ -326,13 +305,13 @@ void CL_SkyShot_f( void )
 	cls.envshot_viewsize = 0;
 }
 
-/* 
-================== 
+/*
+==================
 CL_LevelShot_f
 
 splash logo while map is loading
-================== 
-*/ 
+==================
+*/
 void CL_LevelShot_f( void )
 {
 	size_t	ft1, ft2;
@@ -344,7 +323,7 @@ void CL_LevelShot_f( void )
 	// check for exist
 	if( cls.demoplayback && ( cls.demonum != -1 ))
 	{
-		Q_sprintf( cls.shotname, "levelshots/%s_%s.bmp", cls.demoname, glState.wideScreen ? "16x9" : "4x3" );
+		Q_sprintf( cls.shotname, "levelshots/%s_%s.bmp", cls.demoname, refState.wideScreen ? "16x9" : "4x3" );
 		Q_snprintf( filename, sizeof( filename ), "%s.dem", cls.demoname );
 
 		// make sure what levelshot is newer than demo
@@ -353,7 +332,7 @@ void CL_LevelShot_f( void )
 	}
 	else
 	{
-		Q_sprintf( cls.shotname, "levelshots/%s_%s.bmp", clgame.mapname, glState.wideScreen ? "16x9" : "4x3" );
+		Q_sprintf( cls.shotname, "levelshots/%s_%s.bmp", clgame.mapname, refState.wideScreen ? "16x9" : "4x3" );
 
 		// make sure what levelshot is newer than bsp
 		ft1 = FS_FileTime( cl.worldmodel->name, false );
@@ -366,13 +345,13 @@ void CL_LevelShot_f( void )
 	else cls.scrshot_action = scrshot_inactive;	// disable - not needs
 }
 
-/* 
-================== 
+/*
+==================
 CL_SaveShot_f
 
 mini-pic in loadgame menu
-================== 
-*/ 
+==================
+*/
 void CL_SaveShot_f( void )
 {
 	if( Cmd_Argc() < 2 )
@@ -381,7 +360,7 @@ void CL_SaveShot_f( void )
 		return;
 	}
 
-	Q_sprintf( cls.shotname, "%s%s.bmp", DEFAULT_SAVE_DIRECTORY, Cmd_Argv( 1 ));
+	Q_sprintf( cls.shotname, DEFAULT_SAVE_DIRECTORY "%s.bmp", Cmd_Argv( 1 ));
 	cls.scrshot_action = scrshot_savegame;	// build new frame for saveshot
 }
 
@@ -424,53 +403,7 @@ void CL_SetSky_f( void )
 		return;
 	}
 
-	R_SetupSky( Cmd_Argv( 1 ));
-}
-
-/*
-================
-SCR_TimeRefresh_f
-
-timerefresh [noflip]
-================
-*/
-void SCR_TimeRefresh_f( void )
-{
-	int	i;
-	double	start, stop;
-	double	time;
-
-	if( cls.state != ca_active )
-		return;
-
-	start = Sys_DoubleTime();
-
-	// run without page flipping like GoldSrc
-	if( Cmd_Argc() == 1 )
-	{	
-		pglDrawBuffer( GL_FRONT );
-		for( i = 0; i < 128; i++ )
-		{
-			RI.viewangles[1] = i / 128.0 * 360.0f;
-			R_RenderScene();
-		}
-		pglFinish();
-		R_EndFrame();
-	}
-	else
-	{
-		for( i = 0; i < 128; i++ )
-		{
-			R_BeginFrame( true );
-			RI.viewangles[1] = i / 128.0 * 360.0f;
-			R_RenderScene();
-			R_EndFrame();
-		}
-	}
-
-	stop = Sys_DoubleTime ();
-	time = (stop - start);
-	Con_Printf( "%f seconds (%f fps)\n", time, 128 / time );
+	ref.dllFuncs.R_SetupSky( Cmd_Argv( 1 ));
 }
 
 /*
@@ -482,6 +415,35 @@ viewpos (level-designer helper)
 */
 void SCR_Viewpos_f( void )
 {
-	Con_Printf( "org ( %g %g %g )\n", RI.vieworg[0], RI.vieworg[1], RI.vieworg[2] );
-	Con_Printf( "ang ( %g %g %g )\n", RI.viewangles[0], RI.viewangles[1], RI.viewangles[2] );
+	Con_Printf( "org ( %g %g %g )\n", refState.vieworg[0], refState.vieworg[1], refState.vieworg[2] );
+	Con_Printf( "ang ( %g %g %g )\n", refState.viewangles[0], refState.viewangles[1], refState.viewangles[2] );
+}
+
+/*
+=============
+CL_WavePlayLen_f
+
+=============
+*/
+void CL_WavePlayLen_f( void )
+{
+	const char *name;
+	uint msecs;
+
+	if( Cmd_Argc() != 2 )
+	{
+		Con_Printf( "waveplaylen <wave file name>: returns approximate number of milliseconds a wave file will take to play.\n" );
+		return;
+	}
+
+	name = Cmd_Argv( 1 );
+	msecs = Sound_GetApproxWavePlayLen( name );
+
+	if( msecs == 0 )
+	{
+		Con_Printf( "Unable to read %s, file may be missing or incorrectly formatted.\n", name );
+		return;
+	}
+
+	Con_Printf( "Play time is approximately %dms\n", msecs );
 }

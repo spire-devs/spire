@@ -60,6 +60,9 @@ GNU General Public License for more details.
 #define PARM_GLES_WRAPPER	35	//
 #define PARM_STENCIL_ACTIVE	36
 #define PARM_WATER_ALPHA	37
+#define PARM_TEX_MEMORY	38	// returns total memory of uploaded texture in bytes
+#define PARM_DELUXEDATA	39	// nasty hack, convert int to pointer
+#define PARM_SHADOWDATA	40	// nasty hack, convert int to pointer
 
 // skybox ordering
 enum
@@ -79,7 +82,7 @@ typedef enum
 	TF_KEEP_SOURCE	= (1<<1),		// some images keep source
 	TF_NOFLIP_TGA	= (1<<2),		// Steam background completely ignore tga attribute 0x20
 	TF_EXPAND_SOURCE	= (1<<3),		// Don't keep source as 8-bit expand to RGBA
-	TF_ALLOW_EMBOSS	= (1<<4),		// Allow emboss-mapping for this image
+// reserved
 	TF_RECTANGLE	= (1<<5),		// this is GL_TEXTURE_RECTANGLE
 	TF_CUBEMAP	= (1<<6),		// it's cubemap texture
 	TF_DEPTHMAP	= (1<<7),		// custom texture filter used
@@ -93,7 +96,7 @@ typedef enum
 	TF_NORMALMAP	= (1<<15),	// is a normalmap
 	TF_HAS_ALPHA	= (1<<16),	// image has alpha (used only for GL_CreateTexture)
 	TF_FORCE_COLOR	= (1<<17),	// force upload monochrome textures as RGB (detail textures)
-// reserved
+	TF_UPDATE		= (1<<18),	// allow to update already loaded texture
 	TF_BORDER		= (1<<19),	// zero clamp for projected textures
 	TF_TEXTURE_3D	= (1<<20),	// this is GL_TEXTURE_3D
 	TF_ATLAS_PAGE	= (1<<21),	// bit who indicate lightmap page or deluxemap page
@@ -104,19 +107,23 @@ typedef enum
 	TF_ARB_FLOAT	= (1<<26),	// float textures
 	TF_NOCOMPARE	= (1<<27),	// disable comparing for depth textures
 	TF_ARB_16BIT	= (1<<28),	// keep image as 16-bit (not 24)
+	TF_MULTISAMPLE	= (1<<29)	// multisampling texture
 } texFlags_t;
 
 typedef enum
 {
-	CONTEXT_TYPE_GL = 0,
+	CONTEXT_TYPE_GL = 0, // compatibility profile
 	CONTEXT_TYPE_GLES_1_X,
-	CONTEXT_TYPE_GLES_2_X
+	CONTEXT_TYPE_GLES_2_X,
+	CONTEXT_TYPE_GL_CORE
 } gl_context_type_t;
 
 typedef enum
 {
-	GLES_WRAPPER_NONE = 0,		// native GLES
+	GLES_WRAPPER_NONE = 0,		// native GL
 	GLES_WRAPPER_NANOGL,		// used on GLES platforms
+	GLES_WRAPPER_WES,		// used on GLES platforms
+	GLES_WRAPPER_GL4ES,		// used on GLES platforms
 } gles_wrapper_t;
 
 // 30 bytes here
@@ -126,7 +133,7 @@ typedef struct modelstate_s
 	short		frame;		// 10 bits multiple by 4, should be enough
 	byte		blending[2];
 	byte		controller[4];
-	byte		poseparam[16];		
+	byte		poseparam[16];
 	byte		body;
 	byte		skin;
 	short		scale;		// model scale (multiplied by 16)
@@ -149,13 +156,15 @@ typedef struct decallist_s
 	modelstate_t	studio_state;	// studio decals only
 } decallist_t;
 
+struct ref_viewpass_s;
+
 typedef struct render_api_s
 {
 	// Get renderer info (doesn't changes engine state at all)
-	int		(*RenderGetParm)( int parm, int arg );	// generic
+	intptr_t	(*RenderGetParm)( int parm, int arg );	// generic
 	void		(*GetDetailScaleForTexture)( int texture, float *xScale, float *yScale );
 	void		(*GetExtraParmsForTexture)( int texture, byte *red, byte *green, byte *blue, byte *alpha );
-	lightstyle_t*	(*GetLightStyle)( int number ); 
+	lightstyle_t*	(*GetLightStyle)( int number );
 	dlight_t*		(*GetDynamicLight)( int number );
 	dlight_t*		(*GetEntityLight)( int number );
 	byte		(*LightToTexGamma)( byte color );	// software gamma support
@@ -172,9 +181,9 @@ typedef struct render_api_s
 	const char*	(*GL_TextureName)( unsigned int texnum );
 	const byte*	(*GL_TextureData)( unsigned int texnum ); // may be NULL
 	int		(*GL_LoadTexture)( const char *name, const byte *buf, size_t size, int flags );
-	int		(*GL_CreateTexture)( const char *name, int width, int height, const void *buffer, int flags ); 
+	int		(*GL_CreateTexture)( const char *name, int width, int height, const void *buffer, texFlags_t flags );
 	int		(*GL_LoadTextureArray)( const char **names, int flags );
-	int		(*GL_CreateTextureArray)( const char *name, int width, int height, int depth, const void *buffer, int flags );
+	int		(*GL_CreateTextureArray)( const char *name, int width, int height, int depth, const void *buffer, texFlags_t flags );
 	void		(*GL_FreeTexture)( unsigned int texnum );
 
 	// Decals manipulating (draw & remove)
@@ -184,9 +193,9 @@ typedef struct render_api_s
 
 	// AVIkit support
 	void		*(*AVI_LoadVideo)( const char *filename, qboolean load_audio );
-	int		(*AVI_GetVideoInfo)( void *Avi, long *xres, long *yres, float *duration );
-	long		(*AVI_GetVideoFrameNumber)( void *Avi, float time );
-	byte		*(*AVI_GetVideoFrame)( void *Avi, long frame );
+	int		(*AVI_GetVideoInfo)( void *Avi, int *xres, int *yres, float *duration ); // a1ba: changed longs to int
+	int		(*AVI_GetVideoFrameNumber)( void *Avi, float time );
+	byte		*(*AVI_GetVideoFrame)( void *Avi, int frame );
 	void		(*AVI_UploadRawFrame)( int texture, int cols, int rows, int width, int height, const byte *data );
 	void		(*AVI_FreeVideo)( void *Avi );
 	int		(*AVI_IsActive)( void *Avi );
@@ -216,8 +225,8 @@ typedef struct render_api_s
 	struct mstudiotex_s *( *StudioGetTexture )( struct cl_entity_s *e );
 	const struct ref_overview_s *( *GetOverviewParms )( void );
 	const char	*( *GetFileByIndex )( int fileindex );
-	void		(*R_Reserved0)( void );	// for potential interface expansion without broken compatibility
-	void		(*R_Reserved1)( void );
+	int		(*pfnSaveFile)( const char *filename, const void *data, int len );
+	void		(*R_Reserved0)( void );
 
 	// static allocations
 	void		*(*pfnMemAlloc)( size_t cb, const char *filename, const int fileline );
@@ -225,14 +234,15 @@ typedef struct render_api_s
 
  	// engine utils (not related with render API but placed here)
 	char		**(*pfnGetFilesList)( const char *pattern, int *numFiles, int gamedironly );
-	unsigned long	(*pfnFileBufferCRC32)( const void *buffer, const int length );
+	unsigned int	(*pfnFileBufferCRC32)( const void *buffer, const int length );
 	int		(*COM_CompareFileTime)( const char *filename1, const char *filename2, int *iCompare );
 	void		(*Host_Error)( const char *error, ... ); // cause Host Error
 	void*		( *pfnGetModel )( int modelindex );
 	float		(*pfnTime)( void );				// Sys_DoubleTime
-	void		(*Cvar_Set)( char *name, char *value );
+	void		(*Cvar_Set)( const char *name, const char *value );
 	void		(*S_FadeMusicVolume)( float fadePercent );	// fade background track (0-100 percents)
-	void		(*SetRandomSeed)( long lSeed );		// set custom seed for RANDOM_FLOAT\RANDOM_LONG for predictable random
+	// a1ba: changed long to int
+	void		(*SetRandomSeed)( int lSeed );		// set custom seed for RANDOM_FLOAT\RANDOM_LONG for predictable random
 	// ONLY ADD NEW FUNCTIONS TO THE END OF THIS STRUCT.  INTERFACE VERSION IS FROZEN AT 37
 } render_api_t;
 
@@ -251,7 +261,7 @@ typedef struct render_interface_s
 	// clear decals by engine request (e.g. for demo recording or vid_restart)
 	void		(*R_ClearStudioDecals)( void );
 	// grab r_speeds message
-	qboolean		(*R_SpeedsMessage)( char *out, size_t size );
+	qboolean	(*R_SpeedsMessage)( char *out, size_t size );
 	// alloc or destroy model custom data
 	void		(*Mod_ProcessUserData)( struct model_s *mod, qboolean create, const byte *buffer );
 	// alloc or destroy entity custom data
@@ -262,6 +272,8 @@ typedef struct render_interface_s
 	void		(*R_NewMap)( void );
 	// clear the render entities before each frame
 	void		(*R_ClearScene)( void );
+	// shuffle previous & next states for lerping
+	void		(*CL_UpdateLatchedVars)( struct cl_entity_s *e, qboolean reset );
 } render_interface_t;
 
 #endif//RENDER_API_H

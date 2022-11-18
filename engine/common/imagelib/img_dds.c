@@ -14,23 +14,21 @@ GNU General Public License for more details.
 */
 
 #include "imagelib.h"
-#include "mathlib.h"
+#include "xash3d_mathlib.h"
+#include "img_dds.h"
 
 qboolean Image_CheckDXT3Alpha( dds_t *hdr, byte *fin )
 {
-	uint	bitmask;
 	word	sAlpha;
-	byte	*alpha; 
-	int	x, y, i, j; 
+	byte	*alpha;
+	int	x, y, i, j;
 
 	for( y = 0; y < hdr->dwHeight; y += 4 )
 	{
 		for( x = 0; x < hdr->dwWidth; x += 4 )
 		{
-			alpha = fin;
-			fin += 8;
-			bitmask = ((uint *)fin)[1];
-			fin += 8;
+			alpha = fin + 8;
+			fin += 16;
 
 			for( j = 0; j < 4; j++ )
 			{
@@ -55,8 +53,8 @@ qboolean Image_CheckDXT3Alpha( dds_t *hdr, byte *fin )
 qboolean Image_CheckDXT5Alpha( dds_t *hdr, byte *fin )
 {
 	uint	bits, bitmask;
-	byte	*alphamask; 
-	int	x, y, i, j; 
+	byte	*alphamask;
+	int	x, y, i, j;
 
 	for( y = 0; y < hdr->dwHeight; y += 4 )
 	{
@@ -92,8 +90,8 @@ qboolean Image_CheckDXT5Alpha( dds_t *hdr, byte *fin )
 
 	return false;
 }
-		
-void Image_DXTGetPixelFormat( dds_t *hdr )
+
+void Image_DXTGetPixelFormat( dds_t *hdr, dds_header_dxt10_t *headerExt )
 {
 	uint bits = hdr->dsPixelFormat.dwRGBBitCount;
 
@@ -102,27 +100,53 @@ void Image_DXTGetPixelFormat( dds_t *hdr )
 
 	if( FBitSet( hdr->dsPixelFormat.dwFlags, DDS_FOURCC ))
 	{
-		switch( hdr->dsPixelFormat.dwFourCC )
+		if( hdr->dsPixelFormat.dwFourCC == TYPE_DX10 )
 		{
-		case TYPE_DXT1: 
-			image.type = PF_DXT1;
-			break;
-		case TYPE_DXT2:
-			image.flags &= ~IMAGE_HAS_ALPHA; // alpha is already premultiplied by color
-		case TYPE_DXT3:
-			image.type = PF_DXT3;
-			break;
-		case TYPE_DXT4:
-			image.flags &= ~IMAGE_HAS_ALPHA; // alpha is already premultiplied by color
-		case TYPE_DXT5:
-			image.type = PF_DXT5;
-			break;
-		case TYPE_ATI2:
-			image.type = PF_ATI2;
-			break;
-		default:
-			image.type = PF_UNKNOWN; // assume error
-			break;
+			switch( headerExt->dxgiFormat )
+			{
+			case DXGI_FORMAT_BC6H_SF16:
+				image.type = PF_BC6H_SIGNED;
+				break;
+			case DXGI_FORMAT_BC6H_UF16:
+			case DXGI_FORMAT_BC6H_TYPELESS:
+				image.type = PF_BC6H_UNSIGNED;
+				break;
+			case DXGI_FORMAT_BC7_UNORM:
+			case DXGI_FORMAT_BC7_UNORM_SRGB:
+			case DXGI_FORMAT_BC7_TYPELESS:
+				image.type = PF_BC7;
+				break;
+			default:
+				image.type = PF_UNKNOWN;
+				break;
+			}
+		}
+		else
+		{ 
+			switch( hdr->dsPixelFormat.dwFourCC )
+			{
+			case TYPE_DXT1:
+				image.type = PF_DXT1;
+				break;
+			case TYPE_DXT2:
+				image.flags &= ~IMAGE_HAS_ALPHA; // alpha is already premultiplied by color
+				// intentionally fallthrough
+			case TYPE_DXT3:
+				image.type = PF_DXT3;
+				break;
+			case TYPE_DXT4:
+				image.flags &= ~IMAGE_HAS_ALPHA; // alpha is already premultiplied by color
+				// intentionally fallthrough
+			case TYPE_DXT5:
+				image.type = PF_DXT5;
+				break;
+			case TYPE_ATI2:
+				image.type = PF_ATI2;
+				break;
+			default:
+				image.type = PF_UNKNOWN; // assume error
+				break;
+			}
 		}
 	}
 	else
@@ -136,13 +160,23 @@ void Image_DXTGetPixelFormat( dds_t *hdr )
 		{
 			image.type = PF_UNKNOWN; // assume error
 		}
-		else 
+		else
 		{
-			if( bits == 32 )
+			switch( bits )
+			{
+			case 32:
 				image.type = PF_BGRA_32;
-			else if( bits == 24 )
+				break;
+			case 24:
 				image.type = PF_BGR_24;
-			else image.type = PF_UNKNOWN; // assume error;
+				break;
+			case 8:
+				image.type = PF_LUMINANCE;
+				break;
+			default:
+				image.type = PF_UNKNOWN;
+				break;
+			}
 		}
 	}
 
@@ -161,21 +195,25 @@ size_t Image_DXTGetLinearSize( int type, int width, int height, int depth )
 	case PF_DXT1: return ((( width + 3 ) / 4 ) * (( height + 3 ) / 4 ) * depth * 8 );
 	case PF_DXT3:
 	case PF_DXT5:
+	case PF_BC6H_SIGNED:
+	case PF_BC6H_UNSIGNED:
+	case PF_BC7:
 	case PF_ATI2: return ((( width + 3 ) / 4 ) * (( height + 3 ) / 4 ) * depth * 16 );
+	case PF_LUMINANCE: return (width * height * depth);
 	case PF_BGR_24:
 	case PF_RGB_24: return (width * height * depth * 3);
 	case PF_BGRA_32:
 	case PF_RGBA_32: return (width * height * depth * 4);
-	}	
+	}
 
 	return 0;
 }
 
-size_t Image_DXTCalcMipmapSize( dds_t *hdr ) 
+size_t Image_DXTCalcMipmapSize( dds_t *hdr )
 {
 	size_t	buffsize = 0;
 	int	i, width, height;
-		
+
 	// now correct buffer size
 	for( i = 0; i < Q_max( 1, ( hdr->dwMipMapCount )); i++ )
 	{
@@ -187,14 +225,14 @@ size_t Image_DXTCalcMipmapSize( dds_t *hdr )
 	return buffsize;
 }
 
-uint Image_DXTCalcSize( const char *name, dds_t *hdr, size_t filesize ) 
+uint Image_DXTCalcSize( const char *name, dds_t *hdr, size_t filesize )
 {
 	size_t buffsize = 0;
 	int w = image.width;
 	int h = image.height;
 	int d = image.depth;
 
-	if( hdr->dsCaps.dwCaps2 & DDS_CUBEMAP ) 
+	if( hdr->dsCaps.dwCaps2 & DDS_CUBEMAP )
 	{
 		// cubemap w*h always match for all sides
 		buffsize = Image_DXTCalcMipmapSize( hdr ) * 6;
@@ -209,7 +247,7 @@ uint Image_DXTCalcSize( const char *name, dds_t *hdr, size_t filesize )
 		// just in case (no need, really)
 		buffsize = hdr->dwLinearSize;
 	}
-	else 
+	else
 	{
 		// pretty solution for microsoft bug
 		buffsize = Image_DXTCalcMipmapSize( hdr );
@@ -217,7 +255,7 @@ uint Image_DXTCalcSize( const char *name, dds_t *hdr, size_t filesize )
 
 	if( filesize != buffsize ) // main check
 	{
-		Con_DPrintf( S_WARN "Image_LoadDDS: (%s) probably corrupted (%i should be %i)\n", name, buffsize, filesize );
+		Con_DPrintf( S_WARN "Image_LoadDDS: (%s) probably corrupted (%i should be %lu)\n", name, buffsize, filesize );
 		if( buffsize > filesize )
 			return false;
 	}
@@ -239,20 +277,22 @@ void Image_DXTAdjustVolume( dds_t *hdr )
 Image_LoadDDS
 =============
 */
-qboolean Image_LoadDDS( const char *name, const byte *buffer, size_t filesize )
+qboolean Image_LoadDDS( const char *name, const byte *buffer, fs_offset_t filesize )
 {
 	dds_t	header;
 	byte	*fin;
+	int		headersOffset;
+	dds_header_dxt10_t header2;
 
-	if( filesize < sizeof( dds_t ))
+	if( filesize < sizeof( header ))
 		return false;
 
-	memcpy( &header, buffer, sizeof( dds_t ));
+	memcpy( &header, buffer, sizeof( header ));
 
 	if( header.dwIdent != DDSHEADER )
 		return false; // it's not a dds file, just skip it
 
-	if( header.dwSize != sizeof( dds_t ) - sizeof( uint )) // size of the structure (minus MagicNum)
+	if( header.dwSize != sizeof( header ) - sizeof( uint )) // size of the structure (minus MagicNum)
 	{
 		Con_DPrintf( S_ERROR "Image_LoadDDS: (%s) have corrupted header\n", name );
 		return false;
@@ -264,6 +304,13 @@ qboolean Image_LoadDDS( const char *name, const byte *buffer, size_t filesize )
 		return false;
 	}
 
+	headersOffset = sizeof( header );
+	if( header.dsPixelFormat.dwFourCC == TYPE_DX10 )
+	{
+		memcpy( &header2, buffer + sizeof( header ), sizeof( header2 ));
+		headersOffset += sizeof( header2 );
+	}
+
 	image.width = header.dwWidth;
 	image.height = header.dwHeight;
 
@@ -273,21 +320,21 @@ qboolean Image_LoadDDS( const char *name, const byte *buffer, size_t filesize )
 
 	if( !Image_ValidSize( name )) return false;
 
-	Image_DXTGetPixelFormat( &header ); // and image type too :)
+	Image_DXTGetPixelFormat( &header, &header2 ); // and image type too :)
 	Image_DXTAdjustVolume( &header );
 
 	if( !Image_CheckFlag( IL_DDS_HARDWARE ) && ImageDXT( image.type ))
 		return false; // silently rejected
 
-	if( image.type == PF_UNKNOWN ) 
+	if( image.type == PF_UNKNOWN )
 	{
 		Con_DPrintf( S_ERROR "Image_LoadDDS: (%s) has unrecognized type\n", name );
 		return false;
 	}
 
-	image.size = Image_DXTCalcSize( name, &header, filesize - 128 ); 
+	image.size = Image_DXTCalcSize( name, &header, filesize - headersOffset );
 	if( image.size == 0 ) return false; // just in case
-	fin = (byte *)(buffer + sizeof( dds_t ));
+	fin = (byte *)( buffer + headersOffset );
 
 	// copy an encode method
 	image.encode = (word)header.dwReserved1[0];
@@ -309,10 +356,15 @@ qboolean Image_LoadDDS( const char *name, const byte *buffer, size_t filesize )
 			SetBits( image.flags, IMAGE_HAS_ALPHA );
 		else if( image.type == PF_DXT5 && Image_CheckDXT5Alpha( &header, fin ))
 			SetBits( image.flags, IMAGE_HAS_ALPHA );
+		else if ( image.type == PF_BC7 )
+			SetBits(image.flags, IMAGE_HAS_ALPHA);
 		if( !FBitSet( header.dsPixelFormat.dwFlags, DDS_LUMINANCE ))
 			SetBits( image.flags, IMAGE_HAS_COLOR );
 		break;
 	}
+
+	if( image.type == PF_LUMINANCE )
+		ClearBits( image.flags, IMAGE_HAS_COLOR|IMAGE_HAS_ALPHA );
 
 	if( header.dwReserved1[1] != 0 )
 	{
@@ -324,7 +376,7 @@ qboolean Image_LoadDDS( const char *name, const byte *buffer, size_t filesize )
 	}
 
 	// dds files will be uncompressed on a render. requires minimal of info for set this
-	image.rgba = Mem_Malloc( host.imagepool, image.size ); 
+	image.rgba = Mem_Malloc( host.imagepool, image.size );
 	memcpy( image.rgba, fin, image.size );
 	SetBits( image.flags, IMAGE_DDS_FORMAT );
 

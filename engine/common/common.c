@@ -13,25 +13,29 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 GNU General Public License for more details.
 */
 
+#if defined( ALLOCA_H )
+#include ALLOCA_H
+#endif
 #include "common.h"
 #include "studio.h"
-#include "mathlib.h"
+#include "xash3d_mathlib.h"
 #include "const.h"
 #include "client.h"
 #include "library.h"
+#include "sequence.h"
 
-const char *file_exts[10] =
+static const char *file_exts[] =
 {
-	".cfg",
-	".lst",
-	".exe",
-	".vbs",
-	".com",
-	".bat",
-	".dll",
-	".ini",
-	".log",
-	".sys",
+	"cfg",
+	"lst",
+	"exe",
+	"vbs",
+	"com",
+	"bat",
+	"dll",
+	"ini",
+	"log",
+	"sys",
 };
 
 #ifdef _DEBUG
@@ -45,7 +49,7 @@ void DBG_AssertFunction( qboolean fExpr, const char* szExpr, const char* szFile,
 }
 #endif	// DEBUG
 
-static long idum = 0;
+static int idum = 0;
 
 #define MAX_RANDOM_RANGE	0x7FFFFFFFUL
 #define IA		16807
@@ -58,12 +62,12 @@ static long idum = 0;
 #define AM		(1.0 / IM)
 #define RNMX		(1.0 - EPS)
 
-static long lran1( void )
+static int lran1( void )
 {
-	static long	iy = 0;
-	static long	iv[NTAB];
+	static int	iy = 0;
+	static int	iv[NTAB];
 	int		j;
-	long		k;
+	int		k;
 
 	if( idum <= 0 || !iy )
 	{
@@ -100,7 +104,7 @@ static float fran1( void )
 	return temp;
 }
 
-void COM_SetRandomSeed( long lSeed )
+void COM_SetRandomSeed( int lSeed )
 {
 	if( lSeed ) idum = lSeed;
 	else idum = -time( NULL );
@@ -111,7 +115,7 @@ void COM_SetRandomSeed( long lSeed )
 		idum -= 22261048;
 }
 
-float COM_RandomFloat( float flLow, float flHigh )
+float GAME_EXPORT COM_RandomFloat( float flLow, float flHigh )
 {
 	float	fl;
 
@@ -121,10 +125,10 @@ float COM_RandomFloat( float flLow, float flHigh )
 	return (fl * (flHigh - flLow)) + flLow; // float in [low, high)
 }
 
-long COM_RandomLong( long lLow, long lHigh )
+int GAME_EXPORT COM_RandomLong( int lLow, int lHigh )
 {
 	dword	maxAcceptable;
-	dword	n, x = lHigh - lLow + 1; 	
+	dword	n, x = lHigh - lLow + 1;
 
 	if( idum == 0 ) COM_SetRandomSeed( 0 );
 
@@ -183,7 +187,7 @@ typedef struct
 
 typedef struct
 {
-	lzss_list_t	*hash_table;	
+	lzss_list_t	*hash_table;
 	lzss_node_t	*hash_node;
 	int		window_size;
 } lzss_state_t;
@@ -246,7 +250,7 @@ byte *LZSS_CompressNoAlloc( lzss_state_t *state, byte *pInput, int input_length,
 	lzss_header_t	*header = (lzss_header_t *)pStart;
 	byte		*pOutput = pStart + sizeof( lzss_header_t );
 	const byte	*pEncodedPosition = NULL;
-	byte		*pLookAhead = pInput; 
+	byte		*pLookAhead = pInput;
 	byte		*pWindow = pInput;
 	int		i, putCmdByte = 0;
 	byte		*pCmdByte = NULL;
@@ -259,9 +263,9 @@ byte *LZSS_CompressNoAlloc( lzss_state_t *state, byte *pInput, int input_length,
 	header->size = input_length;
 
 	// create the compression work buffers, small enough (~64K) for stack
-	state->hash_table = (lzss_list_t *)_alloca( 256 * sizeof( lzss_list_t ));
+	state->hash_table = (lzss_list_t *)alloca( 256 * sizeof( lzss_list_t ));
 	memset( state->hash_table, 0, 256 * sizeof( lzss_list_t ));
-	state->hash_node = (lzss_node_t *)_alloca( state->window_size * sizeof( lzss_node_t ));
+	state->hash_node = (lzss_node_t *)alloca( state->window_size * sizeof( lzss_node_t ));
 	memset( state->hash_node, 0, state->window_size * sizeof( lzss_node_t ));
 
 	while( input_length > 0 )
@@ -308,9 +312,9 @@ byte *LZSS_CompressNoAlloc( lzss_state_t *state, byte *pInput, int input_length,
 			*pCmdByte = (*pCmdByte >> 1) | 0x80;
 			*pOutput++ = (( pLookAhead - pEncodedPosition - 1 ) >> LZSS_LOOKSHIFT );
 			*pOutput++ = (( pLookAhead - pEncodedPosition - 1 ) << LZSS_LOOKSHIFT ) | ( encoded_length - 1 );
-		} 
-		else 
-		{ 
+		}
+		else
+		{
 			*pCmdByte = ( *pCmdByte >> 1 );
 			*pOutput++ = *pLookAhead;
 			encoded_length = 1;
@@ -391,7 +395,7 @@ uint LZSS_Decompress( const byte *pInput, byte *pOutput )
 
 	while( 1 )
 	{
-		if( !getCmdByte ) 
+		if( !getCmdByte )
 			cmdByte = *pInput++;
 		getCmdByte = ( getCmdByte + 1 ) & 0x07;
 
@@ -404,15 +408,15 @@ uint LZSS_Decompress( const byte *pInput, byte *pOutput )
 			position |= ( *pInput >> LZSS_LOOKSHIFT );
 			count = ( *pInput++ & 0x0F ) + 1;
 
-			if( count == 1 ) 
+			if( count == 1 )
 				break;
 
 			pSource = pOutput - position - 1;
 			for( i = 0; i < count; i++ )
 				*pOutput++ = *pSource++;
 			totalBytes += count;
-		} 
-		else 
+		}
+		else
 		{
 			*pOutput++ = *pInput++;
 			totalBytes++;
@@ -429,195 +433,6 @@ uint LZSS_Decompress( const byte *pInput, byte *pOutput )
 }
 
 /*
-============
-COM_FileBase
-
-Extracts the base name of a file (no path, no extension, assumes '/' as path separator)
-============
-*/
-void COM_FileBase( const char *in, char *out )
-{
-	int	len, start, end;
-
-	len = Q_strlen( in );
-	if( !len ) return;
-	
-	// scan backward for '.'
-	end = len - 1;
-
-	while( end && in[end] != '.' && in[end] != '/' && in[end] != '\\' )
-		end--;
-	
-	if( in[end] != '.' )
-		end = len-1; // no '.', copy to end
-	else end--; // found ',', copy to left of '.'
-
-	// scan backward for '/'
-	start = len - 1;
-
-	while( start >= 0 && in[start] != '/' && in[start] != '\\' )
-		start--;
-
-	if( start < 0 || ( in[start] != '/' && in[start] != '\\' ))
-		start = 0;
-	else start++;
-
-	// length of new sting
-	len = end - start + 1;
-
-	// Copy partial string
-	Q_strncpy( out, &in[start], len + 1 );
-	out[len] = 0;
-}
-
-/*
-============
-COM_FileExtension
-============
-*/
-const char *COM_FileExtension( const char *in )
-{
-	const char *separator, *backslash, *colon, *dot;
-
-	separator = Q_strrchr( in, '/' );
-	backslash = Q_strrchr( in, '\\' );
-
-	if( !separator || separator < backslash )
-		separator = backslash;
-
-	colon = Q_strrchr( in, ':' );
-
-	if( !separator || separator < colon )
-		separator = colon;
-
-	dot = Q_strrchr( in, '.' );
-
-	if( dot == NULL || ( separator && ( dot < separator )))
-		return "";
-
-	return dot + 1;
-}
-
-/*
-============
-COM_FileWithoutPath
-============
-*/
-const char *COM_FileWithoutPath( const char *in )
-{
-	const char *separator, *backslash, *colon;
-
-	separator = Q_strrchr( in, '/' );
-	backslash = Q_strrchr( in, '\\' );
-
-	if( !separator || separator < backslash )
-		separator = backslash;
-
-	colon = Q_strrchr( in, ':' );
-
-	if( !separator || separator < colon )
-		separator = colon;
-
-	return separator ? separator + 1 : in;
-}
-
-/*
-============
-COM_ExtractFilePath
-============
-*/
-void COM_ExtractFilePath( const char *path, char *dest )
-{
-	const char *src = path + Q_strlen( path ) - 1;
-
-	// back up until a \ or the start
-	while( src != path && !(*(src - 1) == '\\' || *(src - 1) == '/' ))
-		src--;
-
-	if( src != path )
-	{
-		memcpy( dest, path, src - path );
-		dest[src - path - 1] = 0; // cutoff backslash
-	}
-	else Q_strcpy( dest, "" ); // file without path
-}
-
-/*
-============
-COM_StripExtension
-============
-*/
-void COM_StripExtension( char *path )
-{
-	size_t	length;
-
-	length = Q_strlen( path ) - 1;
-	while( length > 0 && path[length] != '.' )
-	{
-		length--;
-		if( path[length] == '/' || path[length] == '\\' || path[length] == ':' )
-			return; // no extension
-	}
-
-	if( length ) path[length] = 0;
-}
-
-/*
-==================
-COM_DefaultExtension
-==================
-*/
-void COM_DefaultExtension( char *path, const char *extension )
-{
-	const char	*src;
-
-	// if path doesn't have a .EXT, append extension
-	// (extension should include the .)
-	src = path + Q_strlen( path ) - 1;
-
-	while( *src != '/' && src != path )
-	{
-		// it has an extension
-		if( *src == '.' ) return;                 
-		src--;
-	}
-
-	Q_strcat( path, extension );
-}
-
-/*
-==================
-COM_ReplaceExtension
-==================
-*/
-void COM_ReplaceExtension( char *path, const char *extension )
-{
-	COM_StripExtension( path );
-	COM_DefaultExtension( path, extension );
-}
-
-/*
-==============
-COM_IsSingleChar
-
-interpert this character as single
-==============
-*/
-static int COM_IsSingleChar( char c )
-{
-	if( c == '{' || c == '}' || c == '\'' || c == ',' )
-		return true;
-
-	if( !host.com_ignorebracket && ( c == ')' || c == '(' ))
-		return true;
-
-	if( host.com_handlecolon && c == ':' )
-		return true;
-
-	return false;
-}
-
-/*
 ==============
 COM_IsWhiteSpace
 
@@ -630,85 +445,6 @@ static int COM_IsWhiteSpace( char space )
 	if( space == ' ' || space == '\t' || space == '\r' || space == '\n' )
 		return 1;
 	return 0;
-}
-
-/*
-==============
-COM_ParseFile
-
-text parser
-==============
-*/
-char *COM_ParseFile( char *data, char *token )
-{
-	int	c, len;
-
-	if( !token )
-		return NULL;
-	
-	len = 0;
-	token[0] = 0;
-	
-	if( !data )
-		return NULL;
-// skip whitespace
-skipwhite:
-	while(( c = ((byte)*data)) <= ' ' )
-	{
-		if( c == 0 )
-			return NULL;	// end of file;
-		data++;
-	}
-	
-	// skip // comments
-	if( c=='/' && data[1] == '/' )
-	{
-		while( *data && *data != '\n' )
-			data++;
-		goto skipwhite;
-	}
-
-	// handle quoted strings specially
-	if( c == '\"' )
-	{
-		data++;
-		while( 1 )
-		{
-			c = (byte)*data++;
-			if( c == '\"' || !c )
-			{
-				token[len] = 0;
-				return data;
-			}
-			token[len] = c;
-			len++;
-		}
-	}
-
-	// parse single characters
-	if( COM_IsSingleChar( c ))
-	{
-		token[len] = c;
-		len++;
-		token[len] = 0;
-		return data + 1;
-	}
-
-	// parse a regular word
-	do
-	{
-		token[len] = c;
-		data++;
-		len++;
-		c = ((byte)*data);
-
-		if( COM_IsSingleChar( c ))
-			break;
-	} while( c > 32 );
-	
-	token[len] = 0;
-
-	return data;
 }
 
 /*
@@ -731,14 +467,14 @@ qboolean COM_ParseVector( char **pfile, float *v, size_t size )
 
 	if( size == 1 )
 	{
-		*pfile = COM_ParseFile( *pfile, token );
+		*pfile = COM_ParseFile( *pfile, token, sizeof( token ));
 		v[0] = Q_atof( token );
 		return true;
 	}
 
 	saved = *pfile;
 
-	if(( *pfile = COM_ParseFile( *pfile, token )) == NULL )
+	if(( *pfile = COM_ParseFile( *pfile, token, sizeof( token ))) == NULL )
 		return false;
 
 	if( token[0] == '(' )
@@ -747,13 +483,13 @@ qboolean COM_ParseVector( char **pfile, float *v, size_t size )
 
 	for( i = 0; i < size; i++ )
 	{
-		*pfile = COM_ParseFile( *pfile, token );
+		*pfile = COM_ParseFile( *pfile, token, sizeof( token ));
 		v[i] = Q_atof( token );
 	}
 
 	if( !bracket ) return true;	// done
 
-	if(( *pfile = COM_ParseFile( *pfile, token )) == NULL )
+	if(( *pfile = COM_ParseFile( *pfile, token, sizeof( token ))) == NULL )
 		return false;
 
 	if( token[0] == ')' )
@@ -763,24 +499,11 @@ qboolean COM_ParseVector( char **pfile, float *v, size_t size )
 
 /*
 =============
-COM_CheckString
-
-=============
-*/
-int COM_CheckString( const char *string )
-{
-	if( !string || !*string )
-		return 0;
-	return 1;
-}
-
-/*
-=============
 COM_FileSize
 
 =============
 */
-int COM_FileSize( const char *filename )
+int GAME_EXPORT COM_FileSize( const char *filename )
 {
 	return FS_FileSize( filename, false );
 }
@@ -791,7 +514,7 @@ COM_AddAppDirectoryToSearchPath
 
 =============
 */
-void COM_AddAppDirectoryToSearchPath( const char *pszBaseDir, const char *appName )
+void GAME_EXPORT COM_AddAppDirectoryToSearchPath( const char *pszBaseDir, const char *appName )
 {
 	FS_AddGameHierarchy( pszBaseDir, FS_NOWRITE_PATH );
 }
@@ -804,7 +527,7 @@ Finds the file in the search path, copies over the name with the full path name.
 This doesn't search in the pak file.
 ===========
 */
-int COM_ExpandFilename( const char *fileName, char *nameOutBuffer, int nameOutBufferSize )
+int GAME_EXPORT COM_ExpandFilename( const char *fileName, char *nameOutBuffer, int nameOutBufferSize )
 {
 	const char	*path;
 	char		result[MAX_SYSPATH];
@@ -817,7 +540,7 @@ int COM_ExpandFilename( const char *fileName, char *nameOutBuffer, int nameOutBu
 	// models\barney.mdl - D:\Xash3D\bshift\models\barney.mdl
 	if(( path = FS_GetDiskPath( fileName, false )) != NULL )
 	{
-		Q_sprintf( result, "%s/%s", host.rootdir, path );		
+		Q_sprintf( result, "%s/%s", host.rootdir, path );
 
 		// check for enough room
 		if( Q_strlen( result ) > nameOutBufferSize )
@@ -860,23 +583,6 @@ void COM_TrimSpace( const char *source, char *dest )
 
 	// terminate the dest string
 	dest[length] = 0;
-}
-
-/*
-============
-COM_FixSlashes
-
-Changes all '/' characters into '\' characters, in place.
-============
-*/
-void COM_FixSlashes( char *pname )
-{
-	while( *pname )
-	{
-		if( *pname == '\\' )
-			*pname = '/';
-		pname++;
-	}
 }
 
 /*
@@ -923,7 +629,7 @@ void COM_HexConvert( const char *pszInput, int nInputLength, byte *pOutput )
 	for( i = 0; i < nInputLength; i += 2 )
 	{
 		pIn = &pszInput[i];
-		*p = COM_Nibble( pIn[0] ) << 4 | COM_Nibble( pIn[1] );		
+		*p = COM_Nibble( pIn[0] ) << 4 | COM_Nibble( pIn[1] );
 		p++;
 	}
 }
@@ -969,7 +675,7 @@ char *COM_MemFgets( byte *pMemFile, int fileSize, int *filePos, char *pBuffer, i
 
 		// copy it out
 		memcpy( pBuffer, pMemFile + *filePos, size );
-		
+
 		// If the buffer isn't full, terminate (this is always true)
 		if( size < bufferSize ) pBuffer[size] = 0;
 
@@ -988,7 +694,7 @@ Cache_Check
 consistency check
 ====================
 */
-void *Cache_Check( byte *mempool, cache_user_t *c )
+void *Cache_Check( poolhandle_t mempool, cache_user_t *c )
 {
 	if( !c->data )
 		return NULL;
@@ -1005,11 +711,11 @@ COM_LoadFileForMe
 
 =============
 */
-byte* COM_LoadFileForMe( const char *filename, int *pLength )
+byte* GAME_EXPORT COM_LoadFileForMe( const char *filename, int *pLength )
 {
 	string	name;
 	byte	*file, *pfile;
-	int	iLength;
+	fs_offset_t	iLength;
 
 	if( !COM_CheckString( filename ))
 	{
@@ -1022,7 +728,7 @@ byte* COM_LoadFileForMe( const char *filename, int *pLength )
 	COM_FixSlashes( name );
 
 	pfile = FS_LoadFile( name, &iLength, false );
-	if( pLength ) *pLength = iLength;
+	if( pLength ) *pLength = (int)iLength;
 
 	if( pfile )
 	{
@@ -1052,11 +758,11 @@ byte *COM_LoadFile( const char *filename, int usehunk, int *pLength )
 
 /*
 =============
-COM_LoadFile
+COM_SaveFile
 
 =============
 */
-int COM_SaveFile( const char *filename, const void *data, long len )
+int GAME_EXPORT COM_SaveFile( const char *filename, const void *data, int len )
 {
 	// check for empty filename
 	if( !COM_CheckString( filename ))
@@ -1075,9 +781,9 @@ COM_FreeFile
 
 =============
 */
-void COM_FreeFile( void *buffer )
+void GAME_EXPORT COM_FreeFile( void *buffer )
 {
-	free( buffer ); 
+	free( buffer );
 }
 
 /*
@@ -1105,7 +811,7 @@ pfnGetModelType
 
 =============
 */
-int pfnGetModelType( model_t *mod )
+int GAME_EXPORT pfnGetModelType( model_t *mod )
 {
 	if( !mod ) return mod_bad;
 	return mod->type;
@@ -1117,7 +823,7 @@ pfnGetModelBounds
 
 =============
 */
-void pfnGetModelBounds( model_t *mod, float *mins, float *maxs )
+void GAME_EXPORT pfnGetModelBounds( model_t *mod, float *mins, float *maxs )
 {
 	if( mod )
 	{
@@ -1138,7 +844,7 @@ pfnCvar_RegisterServerVariable
 standard path to register game variable
 =============
 */
-void pfnCvar_RegisterServerVariable( cvar_t *variable )
+void GAME_EXPORT pfnCvar_RegisterServerVariable( cvar_t *variable )
 {
 	if( variable != NULL )
 		SetBits( variable->flags, FCVAR_EXTDLL );
@@ -1153,7 +859,7 @@ use with precaution: this cvar will NOT unlinked
 after game.dll is unloaded
 =============
 */
-void pfnCvar_RegisterEngineVariable( cvar_t *variable )
+void GAME_EXPORT pfnCvar_RegisterEngineVariable( cvar_t *variable )
 {
 	Cvar_RegisterVariable( (convar_t *)variable );
 }
@@ -1166,6 +872,10 @@ pfnCvar_RegisterVariable
 */
 cvar_t *pfnCvar_RegisterClientVariable( const char *szName, const char *szValue, int flags )
 {
+	// a1ba: try to mitigate outdated client.dll vulnerabilities
+	if( !Q_stricmp( szName, "motdfile" ))
+		flags |= FCVAR_PRIVILEGED;
+
 	if( FBitSet( flags, FCVAR_GLCONFIG ))
 		return (cvar_t *)Cvar_Get( szName, szValue, flags, va( CVAR_GLCONFIG_DESCRIPTION, szName ));
 	return (cvar_t *)Cvar_Get( szName, szValue, flags|FCVAR_CLIENTDLL, Cvar_BuildAutoDescription( flags|FCVAR_CLIENTDLL ));
@@ -1203,7 +913,7 @@ pfnCVarDirectSet
 allow to set cvar directly
 =============
 */
-void pfnCVarDirectSet( cvar_t *var, const char *szValue )
+void GAME_EXPORT pfnCVarDirectSet( cvar_t *var, const char *szValue )
 {
 	Cvar_DirectSet( (convar_t *)var, szValue );
 }
@@ -1214,7 +924,7 @@ COM_CompareFileTime
 
 =============
 */
-int COM_CompareFileTime( const char *filename1, const char *filename2, int *iCompare )
+int GAME_EXPORT COM_CompareFileTime( const char *filename1, const char *filename2, int *iCompare )
 {
 	int	bRet = 0;
 
@@ -1222,8 +932,8 @@ int COM_CompareFileTime( const char *filename1, const char *filename2, int *iCom
 
 	if( filename1 && filename2 )
 	{
-		long ft1 = FS_FileTime( filename1, false );
-		long ft2 = FS_FileTime( filename2, false );
+		int ft1 = FS_FileTime( filename1, false );
+		int ft2 = FS_FileTime( filename2, false );
 
 		// one of files is missing
 		if( ft1 == -1 || ft2 == -1 )
@@ -1242,7 +952,7 @@ COM_CheckParm
 
 =============
 */
-int COM_CheckParm( char *parm, char **ppnext )
+int GAME_EXPORT COM_CheckParm( char *parm, char **ppnext )
 {
 	int	i = Sys_CheckParm( parm );
 
@@ -1262,7 +972,7 @@ pfnTime
 
 =============
 */
-float pfnTime( void )
+float GAME_EXPORT pfnTime( void )
 {
 	return (float)Sys_DoubleTime();
 }
@@ -1273,10 +983,10 @@ pfnGetGameDir
 
 =============
 */
-void pfnGetGameDir( char *szGetGameDir )
+void GAME_EXPORT pfnGetGameDir( char *szGetGameDir )
 {
 	if( !szGetGameDir ) return;
-	Q_sprintf( szGetGameDir, "%s/%s", host.rootdir, GI->gamedir );
+	Q_strcpy( szGetGameDir, GI->gamefolder );
 }
 
 qboolean COM_IsSafeFileToDownload( const char *filename )
@@ -1294,7 +1004,7 @@ qboolean COM_IsSafeFileToDownload( const char *filename )
 
 	Q_strnlwr( filename, lwrfilename, sizeof( lwrfilename ));
 
-	if( Q_strstr( lwrfilename, "\\" ) || Q_strstr( lwrfilename, ":" ) || Q_strstr( lwrfilename, ".." ) || Q_strstr( lwrfilename, "~" ))
+	if( Q_strpbrk( lwrfilename, "\\:~" ) || Q_strstr( lwrfilename, ".." ) )
 		return false;
 
 	if( lwrfilename[0] == '/' )
@@ -1322,3 +1032,155 @@ qboolean COM_IsSafeFileToDownload( const char *filename )
 
 	return true;
 }
+
+char *_copystring( poolhandle_t mempool, const char *s, const char *filename, int fileline )
+{
+	char	*b;
+
+	if( !s ) return NULL;
+	if( !mempool ) mempool = host.mempool;
+
+	b = _Mem_Alloc( mempool, Q_strlen( s ) + 1, false, filename, fileline );
+	Q_strcpy( b, s );
+
+	return b;
+}
+
+/*
+======================
+
+COMMON EXPORT STUBS
+
+======================
+*/
+
+
+/*
+=============
+pfnSequenceGet
+
+used by CS:CZ
+=============
+*/
+void *GAME_EXPORT pfnSequenceGet( const char *fileName, const char *entryName )
+{
+	Msg( "Sequence_Get: file %s, entry %s\n", fileName, entryName );
+
+
+	return Sequence_Get( fileName, entryName );
+}
+
+/*
+=============
+pfnSequencePickSentence
+
+used by CS:CZ
+=============
+*/
+void *GAME_EXPORT pfnSequencePickSentence( const char *groupName, int pickMethod, int *picked )
+{
+	Msg( "Sequence_PickSentence: group %s, pickMethod %i\n", groupName, pickMethod );
+
+	return  Sequence_PickSentence( groupName, pickMethod, picked );
+
+}
+
+/*
+=============
+pfnIsCareerMatch
+
+used by CS:CZ (client stub)
+=============
+*/
+int GAME_EXPORT GAME_EXPORT pfnIsCareerMatch( void )
+{
+	return 0;
+}
+
+/*
+=============
+pfnRegisterTutorMessageShown
+
+only exists in PlayStation version
+=============
+*/
+void GAME_EXPORT pfnRegisterTutorMessageShown( int mid )
+{
+}
+
+/*
+=============
+pfnGetTimesTutorMessageShown
+
+only exists in PlayStation version
+=============
+*/
+int GAME_EXPORT pfnGetTimesTutorMessageShown( int mid )
+{
+	return 0;
+}
+
+/*
+=============
+pfnProcessTutorMessageDecayBuffer
+
+only exists in PlayStation version
+=============
+*/
+void GAME_EXPORT pfnProcessTutorMessageDecayBuffer( int *buffer, int bufferLength )
+{
+}
+
+/*
+=============
+pfnConstructTutorMessageDecayBuffer
+
+only exists in PlayStation version
+=============
+*/
+void GAME_EXPORT pfnConstructTutorMessageDecayBuffer( int *buffer, int bufferLength )
+{
+}
+
+/*
+=============
+pfnResetTutorMessageDecayData
+
+only exists in PlayStation version
+=============
+*/
+void GAME_EXPORT pfnResetTutorMessageDecayData( void )
+{
+}
+
+#if XASH_ENGINE_TESTS
+
+#include "tests.h"
+
+void Test_RunCommon( void )
+{
+	char *file = (char *)"q asdf \"qwerty\" \"f \\\"f\" meowmeow\n// comment \"stuff ignored\"\nbark";
+	int len;
+	char buf[5];
+
+	Msg( "Checking COM_ParseFile...\n" );
+
+	file = COM_ParseFileSafe( file, buf, sizeof( buf ), 0, &len, NULL );
+	TASSERT( !Q_strcmp( buf, "q" ) && len == 1);
+
+	file = COM_ParseFileSafe( file, buf, sizeof( buf ), 0, &len, NULL );
+	TASSERT( !Q_strcmp( buf, "asdf" ) && len == 4);
+
+	file = COM_ParseFileSafe( file, buf, sizeof( buf ), 0, &len, NULL );
+	TASSERT( !Q_strcmp( buf, "qwer" ) && len == -1);
+
+	file = COM_ParseFileSafe( file, buf, sizeof( buf ), 0, &len, NULL );
+	TASSERT( !Q_strcmp( buf, "f \"f" ) && len == 4);
+
+	file = COM_ParseFileSafe( file, buf, sizeof( buf ), 0, &len, NULL );
+	TASSERT( !Q_strcmp( buf, "meow" ) && len == -1);
+
+	file = COM_ParseFileSafe( file, buf, sizeof( buf ), 0, &len, NULL );
+	TASSERT( !Q_strcmp( buf, "bark" ) && len == 4);
+}
+#endif

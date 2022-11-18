@@ -70,17 +70,19 @@ qboolean SV_CopyEdictToPhysEnt( physent_t *pe, edict_t *ed )
 	VectorCopy( ed->v.origin, pe->origin );
 	VectorCopy( ed->v.angles, pe->angles );
 
-	if( FBitSet( ed->v.flags, FL_FAKECLIENT ))
-	{
-		// bot
-		Q_strncpy( pe->name, "bot", sizeof( pe->name ));
-		pe->player = pe->info;
-	}
-	else if( FBitSet( ed->v.flags, FL_CLIENT ))
+	if( FBitSet( ed->v.flags, FL_CLIENT ))
 	{
 		// client
-		SV_GetTrueOrigin( &svs.clients[pe->info - 1], pe->info, pe->origin );
-		Q_strncpy( pe->name, "player", sizeof( pe->name ));
+		SV_GetTrueOrigin( sv.current_client, pe->info, pe->origin );
+		if( FBitSet( ed->v.flags, FL_FAKECLIENT )) // fakeclients have client flag too
+		{
+			// bot
+			Q_strncpy( pe->name, "bot", sizeof( pe->name ));
+		}
+		else
+		{
+			Q_strncpy( pe->name, "player", sizeof( pe->name ));
+		}
 		pe->player = pe->info;
 	}
 	else
@@ -180,7 +182,7 @@ void SV_GetTrueOrigin( sv_client_t *cl, int edictnum, vec3_t origin )
 		return;
 
 	if( svgame.interp[edictnum-1].active && svgame.interp[edictnum-1].moving )
-		VectorCopy( svgame.interp[edictnum-1].oldpos, origin ); 
+		VectorCopy( svgame.interp[edictnum-1].oldpos, origin );
 }
 
 void SV_GetTrueMinMax( sv_client_t *cl, int edictnum, vec3_t mins, vec3_t maxs )
@@ -282,7 +284,7 @@ void SV_AddLinksToPmove( areanode_t *node, const vec3_t pmove_mins, const vec3_t
 				svgame.pmove->numphysent++;
 		}
 	}
-	
+
 	// recurse down both sides
 	if( node->axis == -1 ) return;
 
@@ -303,8 +305,8 @@ void SV_AddLaddersToPmove( areanode_t *node, const vec3_t pmove_mins, const vec3
 	edict_t	*check;
 	model_t	*mod;
 	physent_t	*pe;
-	
-	// get water edicts
+
+	// get ladder edicts
 	for( l = node->solid_edicts.next; l != &node->solid_edicts; l = next )
 	{
 		next = l->next;
@@ -329,22 +331,48 @@ void SV_AddLaddersToPmove( areanode_t *node, const vec3_t pmove_mins, const vec3
 		if( SV_CopyEdictToPhysEnt( pe, check ))
 			svgame.pmove->nummoveent++;
 	}
-	
+
 	// recurse down both sides
 	if( node->axis == -1 ) return;
-	
+
 	if( pmove_maxs[node->axis] > node->dist )
 		SV_AddLaddersToPmove( node->children[0], pmove_mins, pmove_maxs );
 	if( pmove_mins[node->axis] < node->dist )
 		SV_AddLaddersToPmove( node->children[1], pmove_mins, pmove_maxs );
 }
 
-static int pfnTestPlayerPosition( float *pos, pmtrace_t *ptrace )
+static void GAME_EXPORT pfnParticle( const float *origin, int color, float life, int zpos, int zvel )
+{
+	int	v;
+
+	if( !origin )
+	{
+		Con_Reportf( S_ERROR  "SV_StartParticle: NULL origin. Ignored\n" );
+		return;
+	}
+
+	MSG_WriteByte( &sv.reliable_datagram, svc_particle );
+	MSG_WriteVec3Coord( &sv.reliable_datagram, origin );
+	MSG_WriteChar( &sv.reliable_datagram, 0 ); // no x-vel
+	MSG_WriteChar( &sv.reliable_datagram, 0 ); // no y-vel
+	v = bound( -128, (zpos * zvel) * 16.0f, 127 );
+	MSG_WriteChar( &sv.reliable_datagram, v ); // write z-vel
+	MSG_WriteByte( &sv.reliable_datagram, 1 );
+	MSG_WriteByte( &sv.reliable_datagram, color );
+	MSG_WriteByte( &sv.reliable_datagram, bound( 0, life * 8, 255 ));
+}
+
+int SV_TestLine( const vec3_t start, const vec3_t end, int flags )
+{
+	return PM_TestLineExt( svgame.pmove, svgame.pmove->physents, svgame.pmove->numphysent, start, end, flags );
+}
+
+static int GAME_EXPORT pfnTestPlayerPosition( float *pos, pmtrace_t *ptrace )
 {
 	return PM_TestPlayerPosition( svgame.pmove, pos, ptrace, NULL );
 }
 
-static void pfnStuckTouch( int hitent, pmtrace_t *tr )
+static void GAME_EXPORT pfnStuckTouch( int hitent, pmtrace_t *tr )
 {
 	int	i;
 
@@ -363,11 +391,11 @@ static void pfnStuckTouch( int hitent, pmtrace_t *tr )
 	svgame.pmove->touchindex[svgame.pmove->numtouch++] = *tr;
 }
 
-static int pfnPointContents( float *p, int *truecontents )
+static int GAME_EXPORT pfnPointContents( float *p, int *truecontents )
 {
 	int	cont, truecont;
 
-	truecont = cont = SV_TruePointContents( p );
+	truecont = cont = PM_PointContents( svgame.pmove, p );
 	if( truecontents ) *truecontents = truecont;
 
 	if( cont <= CONTENTS_CURRENT_0 && cont >= CONTENTS_CURRENT_DOWN )
@@ -375,17 +403,17 @@ static int pfnPointContents( float *p, int *truecontents )
 	return cont;
 }
 
-static int pfnTruePointContents( float *p )
+static int GAME_EXPORT pfnTruePointContents( float *p )
 {
-	return SV_TruePointContents( p );
+	return PM_TruePointContents( svgame.pmove, p );
 }
 
-static int pfnHullPointContents( struct hull_s *hull, int num, float *p )
+static int GAME_EXPORT pfnHullPointContents( struct hull_s *hull, int num, float *p )
 {
 	return PM_HullPointContents( hull, num, p );
 }
 
-static pmtrace_t pfnPlayerTrace( float *start, float *end, int traceFlags, int ignore_pe )
+static pmtrace_t GAME_EXPORT pfnPlayerTrace( float *start, float *end, int traceFlags, int ignore_pe )
 {
 	return PM_PlayerTraceExt( svgame.pmove, start, end, traceFlags, svgame.pmove->numphysent, svgame.pmove->physents, ignore_pe, NULL );
 }
@@ -396,7 +424,7 @@ static pmtrace_t *pfnTraceLine( float *start, float *end, int flags, int usehull
 	int		old_usehull;
 
 	old_usehull = svgame.pmove->usehull;
-	svgame.pmove->usehull = usehull;	
+	svgame.pmove->usehull = usehull;
 
 	switch( flags )
 	{
@@ -418,7 +446,7 @@ static hull_t *pfnHullForBsp( physent_t *pe, float *offset )
 	return PM_HullForBsp( pe, svgame.pmove, offset );
 }
 
-static float pfnTraceModel( physent_t *pe, float *start, float *end, trace_t *trace )
+static float GAME_EXPORT pfnTraceModel( physent_t *pe, float *start, float *end, trace_t *trace )
 {
 	int	old_usehull;
 	vec3_t	start_l, end_l;
@@ -426,6 +454,8 @@ static float pfnTraceModel( physent_t *pe, float *start, float *end, trace_t *tr
 	qboolean	rotated;
 	matrix4x4	matrix;
 	hull_t	*hull;
+
+	PM_InitTrace( trace, end );
 
 	old_usehull = svgame.pmove->usehull;
 	svgame.pmove->usehull = 2;
@@ -473,9 +503,9 @@ static const char *pfnTraceTexture( int ground, float *vstart, float *vend )
 
 	pe = &svgame.pmove->physents[ground];
 	return PM_TraceTexture( pe, vstart, vend );
-}			
+}
 
-static void pfnPlaySound( int channel, const char *sample, float volume, float attenuation, int fFlags, int pitch )
+static void GAME_EXPORT pfnPlaySound( int channel, const char *sample, float volume, float attenuation, int fFlags, int pitch )
 {
 	edict_t	*ent;
 
@@ -485,7 +515,7 @@ static void pfnPlaySound( int channel, const char *sample, float volume, float a
 	SV_StartSound( ent, channel, sample, volume, attenuation, fFlags|SND_FILTER_CLIENT, pitch );
 }
 
-static void pfnPlaybackEventFull( int flags, int clientindex, word eventindex, float delay, float *origin,
+static void GAME_EXPORT pfnPlaybackEventFull( int flags, int clientindex, word eventindex, float delay, float *origin,
 	float *angles, float fparam1, float fparam2, int iparam1, int iparam2, int bparam1, int bparam2 )
 {
 	edict_t	*ent;
@@ -493,7 +523,7 @@ static void pfnPlaybackEventFull( int flags, int clientindex, word eventindex, f
 	ent = EDICT_NUM( clientindex + 1 );
 	if( !SV_IsValidEdict( ent )) return;
 
-	if( host.type == HOST_DEDICATED )
+	if( Host_IsDedicated() )
 		flags |= FEV_NOTHOST; // no local clients for dedicated server
 
 	SV_PlaybackEventFull( flags, ent, eventindex,
@@ -503,12 +533,12 @@ static void pfnPlaybackEventFull( int flags, int clientindex, word eventindex, f
 		bparam1, bparam2 );
 }
 
-static pmtrace_t pfnPlayerTraceEx( float *start, float *end, int traceFlags, pfnIgnore pmFilter )
+static pmtrace_t GAME_EXPORT pfnPlayerTraceEx( float *start, float *end, int traceFlags, pfnIgnore pmFilter )
 {
 	return PM_PlayerTraceExt( svgame.pmove, start, end, traceFlags, svgame.pmove->numphysent, svgame.pmove->physents, -1, pmFilter );
 }
 
-static int pfnTestPlayerPositionEx( float *pos, pmtrace_t *ptrace, pfnIgnore pmFilter )
+static int GAME_EXPORT pfnTestPlayerPositionEx( float *pos, pmtrace_t *ptrace, pfnIgnore pmFilter )
 {
 	return PM_TestPlayerPosition( svgame.pmove, pos, ptrace, pmFilter );
 }
@@ -519,7 +549,7 @@ static pmtrace_t *pfnTraceLineEx( float *start, float *end, int flags, int usehu
 	int		old_usehull;
 
 	old_usehull = svgame.pmove->usehull;
-	svgame.pmove->usehull = usehull;	
+	svgame.pmove->usehull = usehull;
 
 	switch( flags )
 	{
@@ -577,7 +607,7 @@ void SV_InitClientMove( void )
 
 	// common utilities
 	svgame.pmove->PM_Info_ValueForKey = Info_ValueForKey;
-	svgame.pmove->PM_Particle = CL_Particle; // for local system only
+	svgame.pmove->PM_Particle = pfnParticle;
 	svgame.pmove->PM_TestPlayerPosition = pfnTestPlayerPosition;
 	svgame.pmove->Con_NPrintf = Con_NPrintf;
 	svgame.pmove->Con_DPrintf = Con_DPrintf;
@@ -586,14 +616,14 @@ void SV_InitClientMove( void )
 	svgame.pmove->PM_StuckTouch = pfnStuckTouch;
 	svgame.pmove->PM_PointContents = pfnPointContents;
 	svgame.pmove->PM_TruePointContents = pfnTruePointContents;
-	svgame.pmove->PM_HullPointContents = pfnHullPointContents; 
+	svgame.pmove->PM_HullPointContents = pfnHullPointContents;
 	svgame.pmove->PM_PlayerTrace = pfnPlayerTrace;
 	svgame.pmove->PM_TraceLine = pfnTraceLine;
 	svgame.pmove->RandomLong = COM_RandomLong;
 	svgame.pmove->RandomFloat = COM_RandomFloat;
 	svgame.pmove->PM_GetModelType = pfnGetModelType;
-	svgame.pmove->PM_GetModelBounds = pfnGetModelBounds;	
-	svgame.pmove->PM_HullForBsp = pfnHullForBsp;
+	svgame.pmove->PM_GetModelBounds = pfnGetModelBounds;
+	svgame.pmove->PM_HullForBsp = (void*)pfnHullForBsp;
 	svgame.pmove->PM_TraceModel = pfnTraceModel;
 	svgame.pmove->COM_FileSize = COM_FileSize;
 	svgame.pmove->COM_LoadFile = COM_LoadFile;
@@ -658,7 +688,6 @@ static void SV_SetupPMove( playermove_t *pmove, sv_client_t *cl, usercmd_t *ucmd
 	pmove->flFallVelocity = clent->v.flFallVelocity;
 	pmove->flSwimTime = clent->v.flSwimTime;
 	VectorCopy( clent->v.punchangle, pmove->punchangle );
-	pmove->flSwimTime = clent->v.flSwimTime;
 	pmove->flNextPrimaryAttack = 0.0f; // not used by PM_ code
 	pmove->effects = clent->v.effects;
 	pmove->flags = clent->v.flags;
@@ -687,9 +716,9 @@ static void SV_SetupPMove( playermove_t *pmove, sv_client_t *cl, usercmd_t *ucmd
 	VectorCopy( clent->v.vuser2, pmove->vuser2 );
 	VectorCopy( clent->v.vuser3, pmove->vuser3 );
 	VectorCopy( clent->v.vuser4, pmove->vuser4 );
-	pmove->cmd = *ucmd;	// setup current cmds	
+	pmove->cmd = *ucmd;	// setup current cmds
 	pmove->runfuncs = true;
-	
+
 	Q_strncpy( pmove->physinfo, physinfo, MAX_INFO_STRING );
 
 	// setup physents
@@ -725,7 +754,7 @@ static void SV_FinishPMove( playermove_t *pmove, sv_client_t *cl )
 	VectorCopy( pmove->movedir, clent->v.movedir );
 	clent->v.flTimeStepSound = pmove->flTimeStepSound;
 	clent->v.flFallVelocity = pmove->flFallVelocity;
-	clent->v.oldbuttons = pmove->oldbuttons;
+	clent->v.oldbuttons = pmove->cmd.buttons;
 	clent->v.waterlevel = pmove->waterlevel;
 	clent->v.watertype = pmove->watertype;
 	clent->v.maxspeed = pmove->clientmaxspeed;
@@ -755,16 +784,16 @@ static void SV_FinishPMove( playermove_t *pmove, sv_client_t *cl )
 
 	if( pmove->onground == -1 )
 	{
-		clent->v.flags &= ~FL_ONGROUND;
+		ClearBits( clent->v.flags, FL_ONGROUND );
 	}
 	else if( pmove->onground >= 0 && pmove->onground < pmove->numphysent )
 	{
-		clent->v.flags |= FL_ONGROUND;
+		SetBits( clent->v.flags, FL_ONGROUND );
 		clent->v.groundentity = EDICT_NUM( pmove->physents[pmove->onground].info );
 	}
 
 	// angles
-	// show 1/3 the pitch angle and all the roll angle	
+	// show 1/3 the pitch angle and all the roll angle
 	if( !clent->v.fixangle )
 	{
 		VectorCopy( pmove->angles, clent->v.v_angle );
@@ -782,7 +811,7 @@ static void SV_FinishPMove( playermove_t *pmove, sv_client_t *cl )
 entity_state_t *SV_FindEntInPack( int index, client_frame_t *frame )
 {
 	entity_state_t	*state;
-	int		i;	
+	int		i;
 
 	for( i = 0; i < frame->num_entities; i++ )
 	{
@@ -880,10 +909,7 @@ void SV_SetupMoveInterpolant( sv_client_t *cl )
 				if( SV_UnlagCheckTeleport( state->origin, lerp->finalpos ))
 					lerp->nointerp = true;
 			}
-			else
-			{
-				lerp->firstframe = true;
-			}
+			else lerp->firstframe = true;
 
 			VectorCopy( state->origin, lerp->finalpos );
 		}
@@ -892,7 +918,7 @@ void SV_SetupMoveInterpolant( sv_client_t *cl )
 			break;
 	}
 
-	if( i == SV_UPDATE_BACKUP || finalpush - frame->senttime > 1.0 )
+	if( i == SV_UPDATE_BACKUP || finalpush - frame->senttime > 1.0f )
 	{
 		memset( svgame.interp, 0, sizeof( svgame.interp ));
 		has_update = false;
@@ -981,10 +1007,10 @@ void SV_RestoreMoveInterpolant( sv_client_t *cl )
 
 		oldlerp = &svgame.interp[i];
 
-		if( VectorCompare( oldlerp->oldpos, oldlerp->newpos ) || !oldlerp->moving )
+		if( VectorCompareEpsilon( oldlerp->oldpos, oldlerp->newpos, ON_EPSILON ))
 			continue; // they didn't actually move.
 
-		if( !oldlerp->active )
+		if( !oldlerp->moving || !oldlerp->active )
 			continue;
 
 		if( VectorCompare( oldlerp->curpos, check->edict->v.origin ))
@@ -1009,7 +1035,7 @@ void SV_RunCmd( sv_client_t *cl, usercmd_t *ucmd, int random_seed )
 	trace_t	trace;
 	vec3_t	oldvel;
 	usercmd_t cmd;
-   
+
 	clent = cl->edict;
 	cmd = *ucmd;
 
@@ -1034,9 +1060,7 @@ void SV_RunCmd( sv_client_t *cl, usercmd_t *ucmd, int random_seed )
 	}
 
 	if( !FBitSet( cl->flags, FCL_FAKECLIENT ))
-	{
 		SV_SetupMoveInterpolant( cl );
-	}
 
 	svgame.dllFuncs.pfnCmdStart( cl->edict, ucmd, random_seed );
 
@@ -1119,4 +1143,4 @@ void SV_RunCmd( sv_client_t *cl, usercmd_t *ucmd, int random_seed )
 	{
 		SV_RestoreMoveInterpolant( cl );
 	}
-}                                                         
+}

@@ -16,7 +16,7 @@ GNU General Public License for more details.
 #include "common.h"
 #include "protocol.h"
 #include "net_buffer.h"
-#include "mathlib.h"
+#include "xash3d_mathlib.h"
 
 //#define DEBUG_NET_MESSAGES_SEND
 //#define DEBUG_NET_MESSAGES_READ
@@ -27,7 +27,7 @@ GNU General Public License for more details.
 static dword	BitWriteMasks[32][33];
 static dword	ExtraMasks[32];
 
-short MSG_BigShort( short swap )
+unsigned short MSG_BigShort( unsigned short swap )
 {
 	return (swap >> 8)|(swap << 8);
 }
@@ -51,7 +51,7 @@ void MSG_InitMasks( void )
 	for( maskBit = 0; maskBit < 32; maskBit++ )
 		ExtraMasks[maskBit] = (uint)BIT( maskBit ) - 1;
 }
- 
+
 void MSG_InitExt( sizebuf_t *sb, const char *pDebugName, void *pData, int nBytes, int nMaxBits )
 {
 	MSG_StartWriting( sb, pData, nBytes, 0, nMaxBits );
@@ -119,7 +119,7 @@ int MSG_SeekToBit( sizebuf_t *sb, int bitPos, int whence )
 	case SEEK_END:
 		bitPos += sb->nDataBits;
 		break;
-	default: 
+	default:
 		return -1;
 	}
 
@@ -165,7 +165,7 @@ void MSG_WriteUBitLong( sizebuf_t *sb, uint curData, int numbits )
 		dword	iCurBitMasked;
 		int	nBitsWritten;
 
-		Assert(( iDWord * 4 + sizeof( long )) <= (uint)MSG_GetMaxBytes( sb ));
+		Assert(( iDWord * 4 + sizeof( int )) <= (uint)MSG_GetMaxBytes( sb ));
 
 		iCurBitMasked = iCurBit & 31;
 		((dword *)sb->pData)[iDWord] &= BitWriteMasks[iCurBitMasked][nBitsLeft];
@@ -252,7 +252,7 @@ qboolean MSG_WriteBits( sizebuf_t *sb, const void *pData, int nBits )
 		nBitsLeft -= 8;
 		++pOut;
 	}
-	
+
 	// Read the remaining bits.
 	if( nBitsLeft )
 	{
@@ -304,12 +304,12 @@ void MSG_WriteVec3Angles( sizebuf_t *sb, const float *fa )
 
 void MSG_WriteBitFloat( sizebuf_t *sb, float val )
 {
-	long	intVal;
+	int	intVal;
 
-	Assert( sizeof( long ) == sizeof( float ));
+	Assert( sizeof( int ) == sizeof( float ));
 	Assert( sizeof( float ) == 4 );
 
-	intVal = *((long *)&val );
+	intVal = *((int *)&val );
 	MSG_WriteUBitLong( sb, intVal, 32 );
 }
 
@@ -360,9 +360,9 @@ void MSG_WriteWord( sizebuf_t *sb, int val )
 	MSG_WriteUBitLong( sb, val, sizeof( word ) << 3 );
 }
 
-void MSG_WriteLong( sizebuf_t *sb, long val )
+void MSG_WriteLong( sizebuf_t *sb, int val )
 {
-	MSG_WriteSBitLong( sb, val, sizeof( long ) << 3 );
+	MSG_WriteSBitLong( sb, val, sizeof( int ) << 3 );
 }
 
 void MSG_WriteDword( sizebuf_t *sb, dword val )
@@ -386,12 +386,12 @@ qboolean MSG_WriteString( sizebuf_t *sb, const char *pStr )
 	{
 		do
 		{
-			MSG_WriteChar( sb, *pStr );
+			MSG_WriteChar( sb, (signed char)*pStr );
 			pStr++;
 		} while( *( pStr - 1 ));
 	}
 	else MSG_WriteChar( sb, 0 );
-	
+
 	return !sb->bOverflow;
 }
 
@@ -446,7 +446,7 @@ uint MSG_ReadUBitLong( sizebuf_t *sb, int numbits )
 	{
 		int	nExtraBits = sb->iCurBit & 31;
 		uint	dword2 = ((uint *)sb->pData)[idword1+1] & ExtraMasks[nExtraBits];
-		
+
 		// no need to mask since we hit the end of the dword.
 		// shift the second dword's part into the high bits.
 		ret |= (dword2 << ( numbits - nExtraBits ));
@@ -456,10 +456,10 @@ uint MSG_ReadUBitLong( sizebuf_t *sb, int numbits )
 
 float MSG_ReadBitFloat( sizebuf_t *sb )
 {
-	long	val;
+	int	val;
 	int	bit, byte;
 
-	Assert( sizeof( float ) == sizeof( long ));
+	Assert( sizeof( float ) == sizeof( int ));
 	Assert( sizeof( float ) == 4 );
 
 	if( MSG_Overflow( sb, 32 ))
@@ -484,7 +484,7 @@ qboolean MSG_ReadBits( sizebuf_t *sb, void *pOutData, int nBits )
 {
 	byte	*pOut = (byte *)pOutData;
 	int	nBitsLeft = nBits;
-	
+
 	// get output dword-aligned.
 	while((( dword )pOut & 3) != 0 && nBitsLeft >= 8 )
 	{
@@ -508,7 +508,7 @@ qboolean MSG_ReadBits( sizebuf_t *sb, void *pOutData, int nBits )
 		++pOut;
 		nBitsLeft -= 8;
 	}
-	
+
 	// read the remaining bits.
 	if( nBitsLeft )
 	{
@@ -529,7 +529,7 @@ float MSG_ReadBitAngle( sizebuf_t *sb, int numbits )
 	fReturn = (float)i * ( 360.0f / shift );
 
 	// clamp the finale angle
-	if( fReturn < -180.0f ) fReturn += 360.0f; 
+	if( fReturn < -180.0f ) fReturn += 360.0f;
 	else if( fReturn > 180.0f ) fReturn -= 360.0f;
 
 	return fReturn;
@@ -616,10 +616,9 @@ void MSG_ReadVec3Angles( sizebuf_t *sb, vec3_t fa )
 	fa[2] = MSG_ReadBitAngle( sb, 16 );
 }
 
-
-long MSG_ReadLong( sizebuf_t *sb )
+int MSG_ReadLong( sizebuf_t *sb )
 {
-	return MSG_ReadSBitLong( sb, sizeof( long ) << 3 );
+	return MSG_ReadSBitLong( sb, sizeof( int ) << 3 );
 }
 
 dword MSG_ReadDword( sizebuf_t *sb )
@@ -645,9 +644,9 @@ qboolean MSG_ReadBytes( sizebuf_t *sb, void *pOut, int nBytes )
 
 char *MSG_ReadStringExt( sizebuf_t *sb, qboolean bLine )
 {
-	static char	string[2048];
+	static char	string[4096];
 	int		l = 0, c;
-	
+
 	do
 	{
 		// use MSG_ReadByte so -1 is out of bounds

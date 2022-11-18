@@ -17,7 +17,7 @@ GNU General Public License for more details.
 #include "world.h"
 #include "pm_defs.h"
 #include "mod_local.h"
-#include "mathlib.h"
+#include "xash3d_mathlib.h"
 #include "studio.h"
 
 // just for debug
@@ -85,7 +85,7 @@ World_MoveBounds
 void World_MoveBounds( const vec3_t start, vec3_t mins, vec3_t maxs, const vec3_t end, vec3_t boxmins, vec3_t boxmaxs )
 {
 	int	i;
-	
+
 	for( i = 0; i < 3; i++ )
 	{
 		if( end[i] > start[i] )
@@ -106,7 +106,7 @@ trace_t World_CombineTraces( trace_t *cliptrace, trace_t *trace, edict_t *touch 
 	if( trace->allsolid || trace->startsolid || trace->fraction < cliptrace->fraction )
 	{
 		trace->ent = touch;
-		
+
 		if( cliptrace->startsolid )
 		{
 			*cliptrace = *trace;
@@ -191,65 +191,4 @@ int RankForContents( int contents )
 	case CONTENTS_SOLID:	return 12;
 	default:			return 13; // any user contents has more priority than default
 	}
-}
-
-/*
-==================
-BoxOnPlaneSide
-
-Returns 1, 2, or 1 + 2
-==================
-*/
-int BoxOnPlaneSide( const vec3_t emins, const vec3_t emaxs, const mplane_t *p )
-{
-	float	dist1, dist2;
-	int	sides = 0;
-
-	// general case
-	switch( p->signbits )
-	{
-	case 0:
-		dist1 = p->normal[0]*emaxs[0] + p->normal[1]*emaxs[1] + p->normal[2]*emaxs[2];
-		dist2 = p->normal[0]*emins[0] + p->normal[1]*emins[1] + p->normal[2]*emins[2];
-		break;
-	case 1:
-		dist1 = p->normal[0]*emins[0] + p->normal[1]*emaxs[1] + p->normal[2]*emaxs[2];
-		dist2 = p->normal[0]*emaxs[0] + p->normal[1]*emins[1] + p->normal[2]*emins[2];
-		break;
-	case 2:
-		dist1 = p->normal[0]*emaxs[0] + p->normal[1]*emins[1] + p->normal[2]*emaxs[2];
-		dist2 = p->normal[0]*emins[0] + p->normal[1]*emaxs[1] + p->normal[2]*emins[2];
-		break;
-	case 3:
-		dist1 = p->normal[0]*emins[0] + p->normal[1]*emins[1] + p->normal[2]*emaxs[2];
-		dist2 = p->normal[0]*emaxs[0] + p->normal[1]*emaxs[1] + p->normal[2]*emins[2];
-		break;
-	case 4:
-		dist1 = p->normal[0]*emaxs[0] + p->normal[1]*emaxs[1] + p->normal[2]*emins[2];
-		dist2 = p->normal[0]*emins[0] + p->normal[1]*emins[1] + p->normal[2]*emaxs[2];
-		break;
-	case 5:
-		dist1 = p->normal[0]*emins[0] + p->normal[1]*emaxs[1] + p->normal[2]*emins[2];
-		dist2 = p->normal[0]*emaxs[0] + p->normal[1]*emins[1] + p->normal[2]*emaxs[2];
-		break;
-	case 6:
-		dist1 = p->normal[0]*emaxs[0] + p->normal[1]*emins[1] + p->normal[2]*emins[2];
-		dist2 = p->normal[0]*emins[0] + p->normal[1]*emaxs[1] + p->normal[2]*emaxs[2];
-		break;
-	case 7:
-		dist1 = p->normal[0]*emins[0] + p->normal[1]*emins[1] + p->normal[2]*emins[2];
-		dist2 = p->normal[0]*emaxs[0] + p->normal[1]*emaxs[1] + p->normal[2]*emaxs[2];
-		break;
-	default:
-		// shut up compiler
-		dist1 = dist2 = 0;
-		break;
-	}
-
-	if( dist1 >= p->dist )
-		sides = 1;
-	if( dist2 < p->dist )
-		sides |= 2;
-
-	return sides;
 }

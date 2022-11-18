@@ -12,23 +12,22 @@ but WITHOUT ANY WARRANTY; without even the implied warranty of
 MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 GNU General Public License for more details.
 */
-
+#include "common.h"
 #include "mod_local.h"
 #include "sprite.h"
-#include "mathlib.h"
+#include "xash3d_mathlib.h"
 #include "alias.h"
 #include "studio.h"
 #include "wadfile.h"
 #include "world.h"
-#include "gl_local.h"
-#include "features.h"
+#include "enginefeatures.h"
 #include "client.h"
 #include "server.h"
 
 static model_info_t	mod_crcinfo[MAX_MODELS];
 static model_t	mod_known[MAX_MODELS];
 static int	mod_numknown = 0;
-byte		*com_studiocache;		// cache for submodels
+poolhandle_t      com_studiocache;		// cache for submodels
 convar_t		*mod_studiocache;
 convar_t		*r_wadtextures;
 convar_t		*r_showhull;
@@ -56,7 +55,7 @@ static void Mod_Modellist_f( void )
 
 	for( i = nummodels = 0, mod = mod_known; i < mod_numknown; i++, mod++ )
 	{
-		if( !mod->name[0] )
+		if( !COM_CheckStringEmpty( mod->name ) )
 			continue; // free slot
 		Con_Printf( "%s\n", mod->name );
 		nummodels++;
@@ -75,10 +74,10 @@ Mod_FreeUserData
 static void Mod_FreeUserData( model_t *mod )
 {
 	// ignore submodels and freed models
-	if( !mod->name[0] || mod->name[0] == '*' )
+	if( !COM_CheckStringEmpty( mod->name ) || mod->name[0] == '*' )
 		return;
 
-	if( host.type == HOST_DEDICATED )
+	if( Host_IsDedicated() )
 	{
 		if( svgame.physFuncs.Mod_ProcessUserData != NULL )
 		{
@@ -86,14 +85,12 @@ static void Mod_FreeUserData( model_t *mod )
 			svgame.physFuncs.Mod_ProcessUserData( mod, false, NULL );
 		}
 	}
+#if !XASH_DEDICATED
 	else
 	{
-		if( clgame.drawFuncs.Mod_ProcessUserData != NULL )
-		{
-			// let the client.dll free custom data
-			clgame.drawFuncs.Mod_ProcessUserData( mod, false, NULL );
-		}
+		ref.dllFuncs.Mod_ProcessRenderData( mod, false, NULL );
 	}
+#endif
 }
 
 /*
@@ -101,30 +98,22 @@ static void Mod_FreeUserData( model_t *mod )
 Mod_FreeModel
 ================
 */
-static void Mod_FreeModel( model_t *mod )
+void Mod_FreeModel( model_t *mod )
 {
 	// already freed?
-	if( !mod || !mod->name[0] )
+	if( !mod || !COM_CheckStringEmpty( mod->name ) )
 		return;
 
-	if( mod->name[0] != '*' )
-		Mod_FreeUserData( mod );
-
-	// select the properly unloader
-	switch( mod->type )
+	if( mod->type != mod_brush || mod->name[0] != '*' )
 	{
-	case mod_sprite:
-		Mod_UnloadSpriteModel( mod );
-		break;
-	case mod_studio:
-		Mod_UnloadStudioModel( mod );
-		break;
-	case mod_brush:
-		Mod_UnloadBrushModel( mod );
-		break;
-	case mod_alias:
-		Mod_UnloadAliasModel( mod );
-		break;
+		Mod_FreeUserData( mod );
+		Mem_FreePool( &mod->mempool );
+	}
+
+	if( mod->type == mod_brush && FBitSet( mod->flags, MODEL_WORLD ) )
+	{
+		world.shadowdata = NULL;
+		world.deluxedata = NULL;
 	}
 
 	memset( mod, 0, sizeof( *mod ));
@@ -136,6 +125,11 @@ static void Mod_FreeModel( model_t *mod )
 			MODEL INITIALIZE\SHUTDOWN
 
 ===============================================================================
+*/
+/*
+================
+Mod_Init
+================
 */
 void Mod_Init( void )
 {
@@ -160,7 +154,9 @@ void Mod_FreeAll( void )
 {
 	int	i;
 
+#if !XASH_DEDICATED
 	Mod_ReleaseHullPolygons();
+#endif
 	for( i = 0; i < mod_numknown; i++ )
 		Mod_FreeModel( &mod_known[i] );
 	mod_numknown = 0;
@@ -227,7 +223,7 @@ model_t *Mod_FindName( const char *filename, qboolean trackCRC )
 
 	// find a free model slot spot
 	for( i = 0, mod = mod_known; i < mod_numknown; i++, mod++ )
-		if( !mod->name[0] ) break; // this is a valid spot
+		if( !COM_CheckStringEmpty( mod->name ) ) break; // this is a valid spot
 
 	if( i == mod_numknown )
 	{
@@ -256,7 +252,7 @@ Loads a model into the cache
 model_t *Mod_LoadModel( model_t *mod, qboolean crash )
 {
 	char		tempname[MAX_QPATH];
-	long		length = 0;
+	fs_offset_t		length = 0;
 	qboolean		loaded;
 	byte		*buf;
 	model_info_t	*p;
@@ -282,8 +278,8 @@ model_t *Mod_LoadModel( model_t *mod, qboolean crash )
 	{
 		memset( mod, 0, sizeof( model_t ));
 
-		if( crash ) Host_Error( "%s couldn't load\n", tempname );
-		else Con_Printf( S_ERROR "%s couldn't load\n", tempname );
+		if( crash ) Host_Error( "Could not load model %s from disk\n", tempname );
+		else Con_Printf( S_ERROR "Could not load model %s from disk\n", tempname );
 
 		return NULL;
 	}
@@ -303,12 +299,14 @@ model_t *Mod_LoadModel( model_t *mod, qboolean crash )
 		Mod_LoadSpriteModel( mod, buf, &loaded, 0 );
 		break;
 	case IDALIASHEADER:
-		Mod_LoadAliasModel( mod, buf, &loaded );
+		// REFTODO: move server-related code here
+		loaded = true;
 		break;
 	case Q1BSP_VERSION:
 	case HLBSP_VERSION:
 	case QBSP2_VERSION:
 		Mod_LoadBrushModel( mod, buf, &loaded );
+		// ref.dllFuncs.Mod_LoadModel( mod_brush, mod, buf, &loaded, 0 );
 		break;
 	default:
 		Mem_Free( buf );
@@ -316,23 +314,12 @@ model_t *Mod_LoadModel( model_t *mod, qboolean crash )
 		else Con_Printf( S_ERROR "%s has unknown format\n", tempname );
 		return NULL;
 	}
-
-	if( !loaded )
-	{
-		Mod_FreeModel( mod );
-		Mem_Free( buf );
-
-		if( crash ) Host_Error( "%s couldn't load\n", tempname );
-		else Con_Printf( S_ERROR "%s couldn't load\n", tempname );
-
-		return NULL;
-	}
-	else
+	if( loaded )
 	{
 		if( world.loading )
 			SetBits( mod->flags, MODEL_WORLD ); // mark worldmodel
 
-		if( host.type == HOST_DEDICATED )
+		if( Host_IsDedicated() )
 		{
 			if( svgame.physFuncs.Mod_ProcessUserData != NULL )
 			{
@@ -340,14 +327,23 @@ model_t *Mod_LoadModel( model_t *mod, qboolean crash )
 				svgame.physFuncs.Mod_ProcessUserData( mod, true, buf );
 			}
 		}
+#if !XASH_DEDICATED
 		else
 		{
-			if( clgame.drawFuncs.Mod_ProcessUserData != NULL )
-			{
-				// let the client.dll load custom data
-				clgame.drawFuncs.Mod_ProcessUserData( mod, true, buf );
-			}
+			loaded = ref.dllFuncs.Mod_ProcessRenderData( mod, true, buf );
 		}
+#endif
+	}
+
+	if( !loaded )
+	{
+		Mod_FreeModel( mod );
+		Mem_Free( buf );
+
+		if( crash ) Host_Error( "Could not load model %s\n", tempname );
+		else Con_Printf( S_ERROR "Could not load model %s\n", tempname );
+
+		return NULL;
 	}
 
 	p = &mod_crcinfo[mod - mod_known];
@@ -408,8 +404,9 @@ static void Mod_PurgeStudioCache( void )
 
 	// refresh hull data
 	SetBits( r_showhull->flags, FCVAR_CHANGED );
+#if !XASH_DEDICATED
 	Mod_ReleaseHullPolygons();
-
+#endif
 	// release previois map
 	Mod_FreeModel( mod_known );	// world is stuck on slot #0 always
 
@@ -521,7 +518,7 @@ Mod_LoadCacheFile
 void Mod_LoadCacheFile( const char *filename, cache_user_t *cu )
 {
 	char	modname[MAX_QPATH];
-	size_t	size;
+	fs_offset_t	size;
 	byte	*buf;
 
 	Assert( cu != NULL );

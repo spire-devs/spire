@@ -21,7 +21,7 @@ GNU General Public License for more details.
 typedef struct
 {
 	int		num_entities;
-	entity_state_t	entities[MAX_VISIBLE_PACKET];	
+	entity_state_t	entities[MAX_VISIBLE_PACKET];
 	byte		sended[MAX_EDICTS_BYTES];
 } sv_ents_t;
 
@@ -40,8 +40,9 @@ static int SV_EntityNumbers( const void *a, const void *b )
 	ent1 = ((entity_state_t *)a)->number;
 	ent2 = ((entity_state_t *)b)->number;
 
+	// watcom libc compares ents with itself
 	if( ent1 == ent2 )
-		Host_Error( "SV_SortEntities: duplicated entity\n" );
+		return 0;
 
 	if( ent1 < ent2 )
 		return -1;
@@ -142,7 +143,7 @@ static void SV_AddEntitiesToPacket( edict_t *pViewEnt, edict_t *pClient, client_
 			{
 				ents->num_entities++;	// entity accepted
 				c_fullsend++;		// debug counter
-				
+
 			}
 			else
 			{
@@ -155,7 +156,7 @@ static void SV_AddEntitiesToPacket( edict_t *pViewEnt, edict_t *pClient, client_
 
 		if( fullvis ) continue; // portal ents will be added anyway, ignore recursion
 
-		// if its a portal entity, add everything visible from its camera position
+		// if it's a portal entity, add everything visible from its camera position
 		if( from_client && FBitSet( ent->v.effects, EF_MERGE_VISIBILITY ))
 		{
 			SetBits( sv.hostflags, SVF_MERGE_VISIBILITY );
@@ -327,7 +328,7 @@ static void SV_EmitPacketEntities( sv_client_t *cl, client_frame_t *to, sizebuf_
 		}
 
 		if( newnum == oldnum )
-		{	
+		{
 			// delta update from old position
 			// because the force parm is false, this will not result
 			// in any bytes being emited if the entity has not changed at all
@@ -338,7 +339,7 @@ static void SV_EmitPacketEntities( sv_client_t *cl, client_frame_t *to, sizebuf_
 		}
 
 		if( newnum < oldnum )
-		{	
+		{
 			entity_state_t	*baseline = &svs.baselines[newnum];
 			const char	*classname = SV_ClassName( EDICT_NUM( newnum ));
 			int		offset = 0;
@@ -355,7 +356,7 @@ static void SV_EmitPacketEntities( sv_client_t *cl, client_frame_t *to, sizebuf_
 					if( !Q_strcmp( classname, sv.instanced[i].classname ))
 					{
 						baseline = &sv.instanced[i].baseline;
-						offset = -i;
+						offset = -i - 1; // to avoid zero offset
 						break;
 					}
 				}
@@ -368,7 +369,7 @@ static void SV_EmitPacketEntities( sv_client_t *cl, client_frame_t *to, sizebuf_
 		}
 
 		if( newnum > oldnum )
-		{	
+		{
 			edict_t	*ed = EDICT_NUM( oldent->number );
 			qboolean	force = false;
 
@@ -658,7 +659,7 @@ void SV_WriteEntitiesToClient( sv_client_t *cl, sizebuf_t *msg )
 		if( c_notsend > 0 )
 			Con_Printf( S_ERROR "Too many entities in visible packet list. Ignored %d entities\n", c_notsend );
 		cl->ignored_ents = c_notsend;
-	}   
+	}
 
 	// if there were portals visible, there may be out of order entities
 	// in the list which will need to be resorted for the delta compression
@@ -735,7 +736,7 @@ void SV_SendClientDatagram( sv_client_t *cl )
 	MSG_Clear( &cl->datagram );
 
 	if( MSG_CheckOverflow( &msg ))
-	{	
+	{
 		// must have room left for the packet header
 		Con_Printf( S_ERROR "%s overflowed for %s\n", MSG_GetName( &msg ), cl->name );
 		MSG_Clear( &msg );
@@ -809,33 +810,18 @@ void SV_UpdateToReliableMessages( void )
 			continue;	// reliables go to all connected or spawned
 
 		if( MSG_GetNumBytesWritten( &sv.reliable_datagram ) < MSG_GetNumBytesLeft( &cl->netchan.message ))
-		{
 			MSG_WriteBits( &cl->netchan.message, MSG_GetBuf( &sv.reliable_datagram ), MSG_GetNumBitsWritten( &sv.reliable_datagram ));
-		}
-		else
-		{
-			Netchan_CreateFragments( &cl->netchan, &sv.reliable_datagram );
-		}
+		else Netchan_CreateFragments( &cl->netchan, &sv.reliable_datagram );
 
 		if( MSG_GetNumBytesWritten( &sv.datagram ) < MSG_GetNumBytesLeft( &cl->datagram ))
-		{
 			MSG_WriteBits( &cl->datagram, MSG_GetBuf( &sv.datagram ), MSG_GetNumBitsWritten( &sv.datagram ));
-		}
-		else
-		{
-			Con_DPrintf( S_WARN "Ignoring unreliable datagram for %s, would overflow\n", cl->name );
-		}
+		else Con_DPrintf( S_WARN "Ignoring unreliable datagram for %s, would overflow\n", cl->name );
 
 		if( FBitSet( cl->flags, FCL_HLTV_PROXY ))
 		{
 			if( MSG_GetNumBytesWritten( &sv.spec_datagram ) < MSG_GetNumBytesLeft( &cl->datagram ))
-			{
 				MSG_WriteBits( &cl->datagram, MSG_GetBuf( &sv.spec_datagram ), MSG_GetNumBitsWritten( &sv.spec_datagram ));
-			}
-			else
-			{
-				Con_DPrintf( S_WARN "Ignoring spectator datagram for %s, would overflow\n", cl->name );
-			}
+			else Con_DPrintf( S_WARN "Ignoring spectator datagram for %s, would overflow\n", cl->name );
 		}
 	}
 
@@ -852,8 +838,10 @@ SV_SendClientMessages
 */
 void SV_SendClientMessages( void )
 {
-	sv_client_t	*cl;
-	int		i;
+	sv_client_t *cl;
+	int          i;
+	double       updaterate_time;
+	double       time_until_next_message;
 
 	if( sv.state == ss_dead )
 		return;
@@ -879,7 +867,14 @@ void SV_SendClientMessages( void )
 
 		if( cl->state == cs_spawned )
 		{
-			if(( host.realtime + sv.frametime ) >= cl->next_messagetime )
+			// Try to send a message as soon as we can.
+			// If the target time for sending is within the next frame interval ( based on last frame ),
+			// trigger the send now. Note that in single player,
+			// FCL_SEND_NET_MESSAGE flag is also set any time a packet arrives from the client.
+			time_until_next_message = cl->next_messagetime - ( host.realtime + sv.frametime );
+			if( time_until_next_message <= 0.0 )
+				SetBits( cl->flags, FCL_SEND_NET_MESSAGE );
+			else if( time_until_next_message > 2.0 ) // something got hosed
 				SetBits( cl->flags, FCL_SEND_NET_MESSAGE );
 		}
 
@@ -915,7 +910,9 @@ void SV_SendClientMessages( void )
 			}
 
 			// now that we were able to send, reset timer to point to next possible send time.
-			cl->next_messagetime = host.realtime + sv.frametime + cl->cl_updaterate;
+			// check here also because sv_max/minupdaterate could been changed in runtime
+			updaterate_time = bound( 1.0 / sv_maxupdaterate.value, cl->cl_updaterate, 1.0 / sv_minupdaterate.value );
+			cl->next_messagetime   = host.realtime + sv.frametime + updaterate_time; 
 			ClearBits( cl->flags, FCL_SEND_NET_MESSAGE );
 
 			// NOTE: we should send frame even if server is not simulated to prevent overflow
@@ -948,7 +945,7 @@ void SV_SendMessagesToAll( void )
 	{
 		if( cl->state >= cs_connected )
 			SetBits( cl->flags, FCL_SEND_NET_MESSAGE );
-	}	
+	}
 
 	SV_SendClientMessages();
 }
@@ -997,9 +994,15 @@ void SV_InactivateClients( void )
 	{
 		if( !cl->state || !cl->edict )
 			continue;
-			
-		if( !cl->edict || FBitSet( cl->edict->v.flags, FL_FAKECLIENT ))
+
+		if( !cl->edict  )
 			continue;
+
+		if( FBitSet( cl->edict->v.flags, FL_FAKECLIENT ))
+		{
+			SV_DropClient( cl, false );
+			continue;
+		}
 
 		if( cl->state > cs_connected )
 			cl->state = cs_connected;

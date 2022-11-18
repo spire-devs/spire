@@ -16,9 +16,9 @@ GNU General Public License for more details.
 #ifndef VOX_H
 #define VOX_H
 
-#define CVOXWORDMAX			64
-#define CVOXZEROSCANMAX		255	// scan up to this many samples for next zero crossing
-#define MAX_SENTENCES		4096
+#define CVOXWORDMAX	64
+#define CVOXFILESENTENCEMAX 4096
+
 #define SENTENCE_INDEX		-99999	// unique sentence index
 
 typedef struct voxword_s
@@ -34,13 +34,7 @@ typedef struct voxword_s
 	sfx_t	*sfx;		// name and cache pointer
 } voxword_t;
 
-
-typedef struct
-{
-	char	*pName;
-	float	length;
-} sentence_t;
-
+struct channel_s;
 void VOX_LoadWord( struct channel_s *pchan );
 void VOX_FreeWord( struct channel_s *pchan );
 

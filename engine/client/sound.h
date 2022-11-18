@@ -16,9 +16,9 @@ GNU General Public License for more details.
 #ifndef SOUND_H
 #define SOUND_H
 
-extern byte *sndpool;
+extern poolhandle_t sndpool;
 
-#include "mathlib.h"
+#include "xash3d_mathlib.h"
 
 // sound engine rate defines
 #define SOUND_DMA_SPEED		44100	// hardware playback rate
@@ -28,23 +28,6 @@ extern byte *sndpool;
 #define SOUND_32k			32000	// 32khz sample rate
 #define SOUND_44k			44100	// 44khz sample rate
 #define DMA_MSEC_PER_SAMPLE		((float)(1000.0 / SOUND_DMA_SPEED))
-
-#define SND_TRACE_UPDATE_MAX  	2	// max of N channels may be checked for obscured source per frame
-#define SND_RADIUS_MAX		240.0f	// max sound source radius
-#define SND_RADIUS_MIN		24.0f	// min sound source radius
-#define SND_OBSCURED_LOSS_DB		-2.70f	// dB loss due to obscured sound source
-
-// calculate gain based on atmospheric attenuation.
-// as gain excedes threshold, round off (compress) towards 1.0 using spline
-#define SND_GAIN_COMP_EXP_MAX		2.5f	// Increasing SND_GAIN_COMP_EXP_MAX fits compression curve
-					// more closely to original gain curve as it approaches 1.0.  
-#define SND_GAIN_FADE_TIME		0.25f	// xfade seconds between obscuring gain changes
-#define SND_GAIN_COMP_EXP_MIN		0.8f	
-#define SND_GAIN_COMP_THRESH		0.5f	// gain value above which gain curve is rounded to approach 1.0
-#define SND_DB_MAX			140.0f	// max db of any sound source
-#define SND_DB_MED			90.0f	// db at which compression curve changes
-#define SND_DB_MIN			60.0f	// min db of any sound source
-#define SND_GAIN_PLAYER_WEAPON_DB	2.0f	// increase player weapon gain by N dB
 
 // fixed point stuff for real-time resampling
 #define FIX_BITS			28
@@ -56,17 +39,8 @@ extern byte *sndpool;
 #define FIX_FRACTION(a,b)		(FIX(a)/(b))
 #define FIX_FRACPART(a)		((a) & FIX_MASK)
 
-#define SNDLVL_TO_DIST_MULT( sndlvl ) \
-	( sndlvl ? ((pow( 10, s_refdb->value / 20 ) / pow( 10, (float)sndlvl / 20 )) / s_refdist->value ) : 0 )
-
-#define DIST_MULT_TO_SNDLVL( dist_mult ) \
-	(int)( dist_mult ? ( 20 * log10( pow( 10, s_refdb->value / 20 ) / (dist_mult * s_refdist->value ))) : 0 )
-
 // NOTE: clipped sound at 32760 to avoid overload
 #define CLIP( x )			(( x ) > 32760 ? 32760 : (( x ) < -32760 ? -32760 : ( x )))
-#define SWAP( a, b, t )		{(t) = (a); (a) = (b); (b) = (t);}
-#define AVG( a, b )			(((a) + (b)) >> 1 )
-#define AVG4( a, b, c, d )		(((a) + (b) + (c) + (d)) >> 2 )
 
 #define PAINTBUFFER_SIZE		1024	// 44k: was 512
 #define PAINTBUFFER			(g_curpaintbuffer)
@@ -129,12 +103,21 @@ typedef struct
 	float		percent;
 } musicfade_t;
 
+typedef struct snd_format_s
+{
+	unsigned int	speed;
+	unsigned int	width;
+	unsigned int	channels;
+} snd_format_t;
+
 typedef struct
 {
-	int		samples;		// mono samples in buffer
-	int		samplepos;	// in mono samples
-	byte		*buffer;
+	snd_format_t	format;
+	int				samples;		// mono samples in buffer
+	int				samplepos;	// in mono samples
+	byte			*buffer;
 	qboolean		initialized;	// sound engine is active
+	const char		*backendName;
 } dma_t;
 
 #include "vox.h"
@@ -156,7 +139,6 @@ typedef struct rawchan_s
 	int			rightvol;		// 0-255 right volume
 	float			dist_mult;	// distance multiplier (attenuation/clipK)
 	vec3_t			origin;		// only use if fixed_origin is set
-	float			radius;		// radius of this sound effect
 	volatile uint		s_rawend;
 	wavdata_t			sound_info;	// advance play position
 	float			oldtime;		// catch time jumps
@@ -173,7 +155,7 @@ typedef struct channel_s
 	int		rightvol;		// 0-255 right volume
 
 	int		entnum;		// entity soundsource
-	int		entchannel;	// sound channel (CHAN_STREAM, CHAN_VOICE, etc.)	
+	int		entchannel;	// sound channel (CHAN_STREAM, CHAN_VOICE, etc.)
 	vec3_t		origin;		// only use if fixed_origin is set
 	float		dist_mult;	// distance multiplier (attenuation/clipK)
 	int		master_vol;	// 0-255 master volume
@@ -184,16 +166,6 @@ typedef struct channel_s
 	qboolean		staticsound;	// use origin instead of fetching entnum's origin
 	qboolean		localsound;	// it's a local menu sound (not looped, not paused)
 	mixer_t		pMixer;
-
-	// sound culling
-	qboolean		bfirstpass;	// true if this is first time sound is spatialized
-	float		ob_gain;		// gain drop if sound source obscured from listener
-	float		ob_gain_target;	// target gain while crossfading between ob_gain & ob_gain_target
-	float		ob_gain_inc;	// crossfade increment
-	qboolean		bTraced;		// true if channel was already checked this frame for obscuring
-	float		radius;		// radius of this sound effect
-	vec3_t		absmin, absmax;	// filled in CL_GetEntitySpatialization
-	int		movetype;		// to determine point entities
 
 	// sentence mixer
 	int		wordIndex;
@@ -217,8 +189,6 @@ typedef struct
 	qboolean		paused;
 	qboolean		streaming;	// playing AVI-file
 	qboolean		stream_paused;	// pause only background track
-
-	byte		pasbytes[(MAX_MAP_LEAFS+7)/8];// actual PHS for current frame
 } listener_t;
 
 typedef struct
@@ -229,27 +199,11 @@ typedef struct
 	int		source;		// may be game, menu, etc
 } bg_track_t;
 
-/*
-====================================================================
-
-  SYSTEM SPECIFIC FUNCTIONS
-
-====================================================================
-*/
-// initializes cycling through a DMA buffer and returns information on it
-qboolean SNDDMA_Init( void *hInst );
-int SNDDMA_GetSoundtime( void );
-void SNDDMA_Shutdown( void );
-void SNDDMA_BeginPainting( void );
-void SNDDMA_Submit( void );
-void SNDDMA_LockSound( void );
-void SNDDMA_UnlockSound( void );
-
 //====================================================================
 
 #define MAX_DYNAMIC_CHANNELS	(60 + NUM_AMBIENTS)
 #define MAX_CHANNELS	(256 + MAX_DYNAMIC_CHANNELS)	// Scourge Of Armagon has too many static sounds on hip2m4.bsp
-#define MAX_RAW_CHANNELS	16
+#define MAX_RAW_CHANNELS	48
 #define MAX_RAW_SAMPLES	8192
 
 extern sound_t	ambient_sfx[NUM_AMBIENTS];
@@ -263,13 +217,13 @@ extern listener_t	s_listener;
 extern int	idsp_room;
 extern dma_t	dma;
 
-extern convar_t	*s_volume;
-extern convar_t	*s_musicvolume;
-extern convar_t	*s_show;
-extern convar_t	*s_mixahead;
-extern convar_t	*s_lerping;
+extern convar_t	s_musicvolume;
+extern convar_t	s_lerping;
 extern convar_t	*dsp_off;
-extern convar_t	*s_test;		// cvar to testify new effects
+extern convar_t	s_test;		// cvar to testify new effects
+extern convar_t s_samplecount;
+extern convar_t snd_mute_losefocus;
+extern convar_t s_warn_late_precache;
 
 void S_InitScaletable( void );
 wavdata_t *S_LoadSound( sfx_t *sfx );
@@ -308,16 +262,17 @@ void DSP_ClearState( void );
 
 qboolean S_Init( void );
 void S_Shutdown( void );
-void S_Activate( qboolean active, void *hInst );
 void S_SoundList_f( void );
 void S_SoundInfo_f( void );
 
+struct ref_viewpass_s;
 channel_t *SND_PickDynamicChannel( int entnum, int channel, sfx_t *sfx, qboolean *ignore );
 channel_t *SND_PickStaticChannel( const vec3_t pos, sfx_t *sfx );
 int S_GetCurrentStaticSounds( soundlist_t *pout, int size );
 int S_GetCurrentDynamicSounds( soundlist_t *pout, int size );
 sfx_t *S_GetSfxByHandle( sound_t handle );
 rawchan_t *S_FindRawChannel( int entnum, qboolean create );
+void S_RawEntSamples( int entnum, uint samples, uint rate, word width, word channels, const byte *data, int snd_vol );
 void S_RawSamples( uint samples, uint rate, word width, word channels, const byte *data, int entnum );
 void S_StopSound( int entnum, int channel, const char *soundname );
 void S_UpdateFrame( struct ref_viewpass_s *rvp );
@@ -330,9 +285,12 @@ void S_FreeSounds( void );
 // s_mouth.c
 //
 void SND_InitMouth( int entnum, int entchannel );
+void SND_ForceInitMouth( int entnum );
 void SND_MoveMouth8( channel_t *ch, wavdata_t *pSource, int count );
 void SND_MoveMouth16( channel_t *ch, wavdata_t *pSource, int count );
+void SND_MoveMouthRaw( rawchan_t *ch, portable_samplepair_t *pData, int count );
 void SND_CloseMouth( channel_t *ch );
+void SND_ForceCloseMouth( int entnum );
 
 //
 // s_stream.c

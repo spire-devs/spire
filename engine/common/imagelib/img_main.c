@@ -13,6 +13,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 GNU General Public License for more details.
 */
 
+#include <math.h>
 #include "imagelib.h"
 
 // global image variables
@@ -69,20 +70,21 @@ static const cubepack_t load_cubemap[] =
 { NULL, NULL },
 };
 
-// soul of ImageLib - table of image format constants 
+// soul of ImageLib - table of image format constants
 const bpc_desc_t PFDesc[] =
 {
-{PF_UNKNOWN,	"raw",	0x1908, 0 },
-{PF_INDEXED_24,	"pal 24",	0x1908, 1 },
-{PF_INDEXED_32,	"pal 32",	0x1908, 1 },
-{PF_RGBA_32,	"RGBA 32",0x1908, 4 },
-{PF_BGRA_32,	"BGRA 32",0x80E1, 4 },
-{PF_RGB_24,	"RGB 24",	0x1908, 3 },
-{PF_BGR_24,	"BGR 24",	0x80E0, 3 },
-{PF_DXT1,		"DXT 1",	0x83F1, 4 },
-{PF_DXT3,		"DXT 3",	0x83F2, 4 },
-{PF_DXT5,		"DXT 5",	0x83F3, 4 },
-{PF_ATI2,		"ATI 2",	0x8837, 4 },
+{ PF_UNKNOWN,	"raw",	0x1908, 0 },
+{ PF_INDEXED_24,	"pal 24",	0x1908, 1 },
+{ PF_INDEXED_32,	"pal 32",	0x1908, 1 },
+{ PF_RGBA_32,	"RGBA 32",0x1908, 4 },
+{ PF_BGRA_32,	"BGRA 32",0x80E1, 4 },
+{ PF_RGB_24,	"RGB 24",	0x1908, 3 },
+{ PF_BGR_24,	"BGR 24",	0x80E0, 3 },
+{ PF_LUMINANCE,	"LUM 8",	0x1909, 1 },
+{ PF_DXT1,	"DXT 1",	0x83F1, 4 },
+{ PF_DXT3,	"DXT 3",	0x83F2, 4 },
+{ PF_DXT5,	"DXT 5",	0x83F3, 4 },
+{ PF_ATI2,	"ATI 2",	0x8837, 4 },
 };
 
 void Image_Reset( void )
@@ -122,7 +124,7 @@ rgbdata_t *ImagePack( void )
 		return NULL;
 	}
 
-	if( image.cubemap ) 
+	if( image.cubemap )
 	{
 		image.flags |= IMAGE_CUBEMAP;
 		pack->buffer = image.cubemap;
@@ -131,7 +133,7 @@ rgbdata_t *ImagePack( void )
 		pack->type = image.source_type;
 		pack->size = image.size * image.num_sides;
 	}
-	else 
+	else
 	{
 		pack->buffer = image.rgba;
 		pack->width = image.width;
@@ -151,7 +153,7 @@ rgbdata_t *ImagePack( void )
 	pack->numMips = image.num_mips;
 	pack->palette = image.palette;
 	pack->encode = image.encode;
-	
+
 	return pack;
 }
 
@@ -165,7 +167,7 @@ qboolean FS_AddSideToPack( const char *name, int adjust_flags )
 {
 	byte	*out, *flipped;
 	qboolean	resampled = false;
-	
+
 	// first side set average size for all cubemap sides!
 	if( !image.cubemap )
 	{
@@ -176,7 +178,7 @@ qboolean FS_AddSideToPack( const char *name, int adjust_flags )
 
 	// keep constant size, render.dll expecting it
 	image.size = image.source_width * image.source_height * 4;
-          
+
 	// mixing dds format with any existing ?
 	if( image.type != image.source_type )
 		return false;
@@ -213,7 +215,8 @@ rgbdata_t *FS_LoadImage( const char *filename, const byte *buffer, size_t size )
 	const char	*ext = COM_FileExtension( filename );
 	string		path, loadname, sidename;
 	qboolean		anyformat = true;
-	int		i, filesize = 0;
+	int		i;
+	fs_offset_t	filesize = 0;
 	const loadpixformat_t *format;
 	const cubepack_t	*cmap;
 	byte		*f;
@@ -256,7 +259,7 @@ rgbdata_t *FS_LoadImage( const char *filename, const byte *buffer, size_t size )
 					Mem_Free( f ); // release buffer
 					return ImagePack(); // loaded
 				}
-				else Mem_Free( f ); // release buffer 
+				else Mem_Free( f ); // release buffer
 			}
 		}
 	}
@@ -273,14 +276,14 @@ rgbdata_t *FS_LoadImage( const char *filename, const byte *buffer, size_t size )
 				if( anyformat || !Q_stricmp( ext, format->ext ))
 				{
 					Q_sprintf( path, format->formatstring, loadname, cmap->type[i].suf, format->ext );
-					image.hint = cmap->type[i].hint; // side hint
+					image.hint = (image_hint_t)cmap->type[i].hint; // side hint
 
 					f = FS_LoadFile( path, &filesize, false );
 					if( f && filesize > 0 )
 					{
-						// this name will be used only for tell user about problems 
+						// this name will be used only for tell user about problems
 						if( format->loadfunc( path, f, filesize ))
-						{         
+						{
 							Q_snprintf( sidename, sizeof( sidename ), "%s%s.%s", loadname, cmap->type[i].suf, format->ext );
 							if( FS_AddSideToPack( sidename, cmap->type[i].flags )) // process flags to flip some sides
 							{
@@ -296,7 +299,7 @@ rgbdata_t *FS_LoadImage( const char *filename, const byte *buffer, size_t size )
 			if( image.num_sides != i + 1 ) // check side
 			{
 				// first side not found, probably it's not cubemap
-				// it contain info about image_type and dimensions, don't generate black cubemaps 
+				// it contain info about image_type and dimensions, don't generate black cubemaps
 				if( !image.cubemap ) break;
 				// Mem_Alloc already filled memblock with 0x00, no need to do it again
 				image.cubemap = Mem_Realloc( host.imagepool, image.cubemap, image.ptr + image.size );
@@ -384,7 +387,7 @@ qboolean FS_SaveImage( const char *filename, rgbdata_t *pix )
 			return false;	// do not happens
 		}
 
-		pix->size /= 6; // now set as side size 
+		pix->size /= 6; // now set as side size
 		picBuffer = pix->buffer;
 
 		// save all sides seperately
@@ -489,3 +492,99 @@ rgbdata_t *FS_CopyImage( rgbdata_t *in )
 
 	return out;
 }
+
+#if XASH_ENGINE_TESTS
+#include "tests.h"
+
+static void GeneratePixel( byte *pix, uint i, uint j, uint w, uint h, qboolean genAlpha )
+{
+	double x = ( j / (double)w ) - 0.5;
+	double y = ( i / (double)h ) - 0.5;
+	double d = sqrt( x * x + y * y );
+	pix[0] = (byte)(( sin( d * 30.0 ) + 1.0 ) * 126 );
+	pix[1] = (byte)(( sin( d * 27.723 ) + 1.0 ) * 126 );
+	pix[2] = (byte)(( sin( d * 42.41 ) + 1.0 ) * 126 );
+	pix[3] = genAlpha ? (byte)(( cos( d * 2.0 ) + 1.0 ) * 126 ) : 255;
+}
+
+static void Test_CheckImage( const char *name, rgbdata_t *rgb )
+{
+	rgbdata_t *load;
+
+	// test reading
+	load = FS_LoadImage( name, NULL, 0 );
+	TASSERT( load->width == rgb->width )
+	TASSERT( load->height == rgb->height )
+	TASSERT( load->type == rgb->type )
+	TASSERT( ( load->flags & rgb->flags ) != 0 )
+	TASSERT( load->size == rgb->size )
+	TASSERT( memcmp(load->buffer, rgb->buffer, rgb->size ) == 0 )
+
+	Mem_Free( load );
+}
+
+void Test_RunImagelib( void )
+{
+	rgbdata_t rgb = { 0 };
+	byte *buf;
+	const char *extensions[] = { "tga", "png", "bmp" };
+	uint i, j;
+
+	Image_Setup();
+
+	// generate image
+	rgb.width = 256;
+	rgb.height = 512;
+	rgb.type = PF_RGBA_32;
+	rgb.flags = IMAGE_HAS_ALPHA;
+	rgb.size = rgb.width * rgb.height * 4;
+	buf = rgb.buffer = Z_Malloc( rgb.size );
+
+	for( i = 0; i < rgb.height; i++ )
+	{
+		for( j = 0; j < rgb.width; j++ )
+		{
+			GeneratePixel( buf, i, j, rgb.width, rgb.height, true );
+			buf += 4;
+		}
+	}
+
+	for( i = 0; i < sizeof(extensions) / sizeof(extensions[0]); i++ )
+	{
+		const char *name = va( "test_gen.%s", extensions[i] );
+
+		// test saving
+		qboolean ret = FS_SaveImage( name, &rgb );
+		Con_Printf( "Checking if we can save images in '%s' format...\n", extensions[i] );
+		ASSERT(ret == true);
+
+		// test reading
+		Con_Printf( "Checking if we can read images in '%s' format...\n", extensions[i] );
+		Test_CheckImage( name, &rgb );
+	}
+
+	Z_Free( rgb.buffer );
+}
+
+#define IMPLEMENT_IMAGELIB_FUZZ_TARGET( export, target ) \
+int EXPORT export( const uint8_t *Data, size_t Size ) \
+{ \
+	rgbdata_t *rgb; \
+	host.type = HOST_NORMAL; \
+	Memory_Init(); \
+	Image_Init(); \
+	if( target( "#internal", Data, Size )) \
+	{ \
+		rgb = ImagePack(); \
+		FS_FreeImage( rgb ); \
+	} \
+	Image_Shutdown(); \
+	return 0; \
+} \
+
+IMPLEMENT_IMAGELIB_FUZZ_TARGET( Fuzz_Image_LoadBMP, Image_LoadBMP )
+IMPLEMENT_IMAGELIB_FUZZ_TARGET( Fuzz_Image_LoadPNG, Image_LoadPNG )
+IMPLEMENT_IMAGELIB_FUZZ_TARGET( Fuzz_Image_LoadDDS, Image_LoadDDS )
+IMPLEMENT_IMAGELIB_FUZZ_TARGET( Fuzz_Image_LoadTGA, Image_LoadTGA )
+
+#endif /* XASH_ENGINE_TESTS */

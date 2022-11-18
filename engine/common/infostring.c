@@ -21,6 +21,7 @@ GNU General Public License for more details.
 =======================================================================
 
 			INFOSTRING STUFF
+
 =======================================================================
 */
 /*
@@ -121,7 +122,7 @@ qboolean Info_IsValid( const char *s )
 		}
 		*o = 0;
 
-		if( !Q_strlen( value ))
+		if( !COM_CheckStringEmpty( value ) )
 			return false;
 
 		if( *s ) s++;
@@ -130,6 +131,7 @@ qboolean Info_IsValid( const char *s )
 	return true;
 }
 
+#if !XASH_DEDICATED
 /*
 ==============
 Info_WriteVars
@@ -177,6 +179,7 @@ void Info_WriteVars( file_t *f )
 		s++;
 	}
 }
+#endif // XASH_DEDICATED
 
 /*
 ===============
@@ -186,14 +189,14 @@ Searches the string for the given
 key and returns the associated value, or an empty string.
 ===============
 */
-char *Info_ValueForKey( const char *s, const char *key )
+const char *Info_ValueForKey( const char *s, const char *key )
 {
 	char	pkey[MAX_KV_SIZE];
 	static	char value[4][MAX_KV_SIZE]; // use two buffers so compares work without stomping on each other
 	static	int valueindex;
 	int	count;
 	char	*o;
-	
+
 	valueindex = (valueindex + 1) % 4;
 	if( *s == '\\' ) s++;
 
@@ -230,7 +233,7 @@ char *Info_ValueForKey( const char *s, const char *key )
 	}
 }
 
-qboolean Info_RemoveKey( char *s, const char *key )
+qboolean GAME_EXPORT Info_RemoveKey( char *s, const char *key )
 {
 	char	*start;
 	char	pkey[MAX_KV_SIZE];
@@ -242,7 +245,7 @@ qboolean Info_RemoveKey( char *s, const char *key )
 	if( cmpsize > ( MAX_KV_SIZE - 1 ))
 		cmpsize = MAX_KV_SIZE - 1;
 
-	if( Q_strstr( key, "\\" ))
+	if( Q_strchr( key, '\\' ))
 		return false;
 
 	while( 1 )
@@ -414,7 +417,7 @@ qboolean Info_SetValueForStarKey( char *s, const char *key, const char *value, i
 	char	new[1024], *v;
 	int	c, team;
 
-	if( Q_strstr( key, "\\" ) || Q_strstr( value, "\\" ))
+	if( Q_strchr( key, '\\' ) || Q_strchr( value, '\\' ))
 	{
 		Con_Printf( S_ERROR "SetValueForKey: can't use keys or values with a \\\n" );
 		return false;
@@ -423,7 +426,7 @@ qboolean Info_SetValueForStarKey( char *s, const char *key, const char *value, i
 	if( Q_strstr( key, ".." ) || Q_strstr( value, ".." ))
 		return false;
 
-	if( Q_strstr( key, "\"" ) || Q_strstr( value, "\"" ))
+	if( Q_strchr( key, '\"' ) || Q_strchr( value, '\"' ))
 	{
 		Con_Printf( S_ERROR "SetValueForKey: can't use keys or values with a \"\n" );
 		return false;
@@ -434,7 +437,7 @@ qboolean Info_SetValueForStarKey( char *s, const char *key, const char *value, i
 
 	Info_RemoveKey( s, key );
 
-	if( !value || !Q_strlen( value ))
+	if( !COM_CheckString( value ) )
 		return true; // just clear variable
 
 	Q_snprintf( new, sizeof( new ), "\\%s\\%s", key, value );

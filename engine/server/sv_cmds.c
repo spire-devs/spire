@@ -16,6 +16,8 @@ GNU General Public License for more details.
 #include "common.h"
 #include "server.h"
 
+extern convar_t	*con_gamemaps;
+
 /*
 =================
 SV_ClientPrintf
@@ -23,18 +25,18 @@ SV_ClientPrintf
 Sends text across to be displayed if the level passes
 =================
 */
-void SV_ClientPrintf( sv_client_t *cl, char *fmt, ... )
+void SV_ClientPrintf( sv_client_t *cl, const char *fmt, ... )
 {
 	char	string[MAX_SYSPATH];
 	va_list	argptr;
 
 	if( FBitSet( cl->flags, FCL_FAKECLIENT ))
 		return;
-	
+
 	va_start( argptr, fmt );
 	Q_vsprintf( string, fmt, argptr );
 	va_end( argptr );
-	
+
 	MSG_BeginServerCmd( &cl->netchan.message, svc_print );
 	MSG_WriteString( &cl->netchan.message, string );
 }
@@ -46,7 +48,7 @@ SV_BroadcastPrintf
 Sends text to all active clients
 =================
 */
-void SV_BroadcastPrintf( sv_client_t *ignore, char *fmt, ... )
+void SV_BroadcastPrintf( sv_client_t *ignore, const char *fmt, ... )
 {
 	char		string[MAX_SYSPATH];
 	va_list		argptr;
@@ -72,10 +74,10 @@ void SV_BroadcastPrintf( sv_client_t *ignore, char *fmt, ... )
 		}
 	}
 
-	if( host.type == HOST_DEDICATED )
+	if( Host_IsDedicated() )
 	{
 		// echo to console
-		Con_DPrintf( string );
+		Con_DPrintf( "%s", string );
 	}
 }
 
@@ -89,7 +91,7 @@ Sends text to all active clients
 void SV_BroadcastCommand( const char *fmt, ... )
 {
 	char	string[MAX_SYSPATH];
-	va_list	argptr;	
+	va_list	argptr;
 
 	if( sv.state == ss_dead )
 		return;
@@ -111,7 +113,7 @@ Sets sv_client and sv_player to the player with idnum Cmd_Argv(1)
 */
 static sv_client_t *SV_SetPlayer( void )
 {
-	char		*s;
+	const char	*s;
 	sv_client_t	*cl;
 	int		i, idnum;
 
@@ -231,6 +233,43 @@ void SV_Map_f( void )
 
 /*
 ==================
+SV_Maps_f
+
+Lists maps according to given substring.
+
+TODO: Make it more convenient. (Timestamp check, temporary file, ...)
+==================
+*/
+void SV_Maps_f( void )
+{
+	const char *separator = "-------------------";
+	const char *argStr = Cmd_Argv( 1 ); // Substr
+	int nummaps;
+	search_t *mapList;
+
+	if( Cmd_Argc() != 2 )
+	{
+		Msg( S_USAGE "maps <substring>\nmaps * for full listing\n" );
+		return;
+	}
+
+	mapList = FS_Search( va( "maps/*%s*.bsp", argStr ), true, true );
+
+	if( !mapList )
+	{
+		Msg( "No related map found in \"%s/maps\"\n", GI->gamefolder );
+		return;
+	}
+
+	nummaps = Cmd_ListMaps( mapList, NULL, 0 );
+
+	Mem_Free( mapList );
+
+	Msg( "%s\nDirectory: \"%s/maps\" - Maps listed: %d\n", separator, GI->gamefolder, nummaps );
+}
+
+/*
+==================
 SV_MapBackground_f
 
 Set background map (enable physics in menu)
@@ -282,7 +321,9 @@ void SV_NextMap_f( void )
 	int	i, next;
 	search_t	*t;
 
-	t = FS_Search( "maps/*.bsp", true, true ); // only in gamedir
+	t = FS_Search( "maps\\*.bsp", true, CVAR_TO_BOOL( con_gamemaps )); // only in gamedir
+	if( !t ) t = FS_Search( "maps/*.bsp", true, CVAR_TO_BOOL( con_gamemaps )); // only in gamedir
+
 	if( !t )
 	{
 		Con_Printf( "next map can't be found\n" );
@@ -298,7 +339,7 @@ void SV_NextMap_f( void )
 
 		COM_FileBase( t->filenames[i], nextmap );
 		if( Q_stricmp( sv_hostmap->string, nextmap ))
-			continue; 
+			continue;
 
 		next = ( i + 1 ) % t->numfilenames;
 		COM_FileBase( t->filenames[next], nextmap );
@@ -375,7 +416,7 @@ void SV_Load_f( void )
 		return;
 	}
 
-	Q_snprintf( path, sizeof( path ), "%s%s.sav", DEFAULT_SAVE_DIRECTORY, Cmd_Argv( 1 ));
+	Q_snprintf( path, sizeof( path ), DEFAULT_SAVE_DIRECTORY "%s.sav", Cmd_Argv( 1 ));
 	SV_LoadGame( path );
 }
 
@@ -438,8 +479,8 @@ void SV_DeleteSave_f( void )
 	}
 
 	// delete save and saveshot
-	FS_Delete( va( "%s%s.sav", DEFAULT_SAVE_DIRECTORY, Cmd_Argv( 1 )));
-	FS_Delete( va( "%s%s.bmp", DEFAULT_SAVE_DIRECTORY, Cmd_Argv( 1 )));
+	FS_Delete( va( DEFAULT_SAVE_DIRECTORY "%s.sav", Cmd_Argv( 1 )));
+	FS_Delete( va( DEFAULT_SAVE_DIRECTORY "%s.bmp", Cmd_Argv( 1 )));
 }
 
 /*
@@ -537,15 +578,25 @@ Kick a user off of the server
 void SV_Kick_f( void )
 {
 	sv_client_t	*cl;
+	const char *param, *clientId;
 
 	if( Cmd_Argc() != 2 )
 	{
-		Con_Printf( S_USAGE "kick <userid> | <name>\n" );
+		Con_Printf( S_USAGE "kick <#id|name> [reason]\n" );
 		return;
 	}
 
-	if(( cl = SV_SetPlayer( )) == NULL )
+	param = Cmd_Argv( 1 );
+
+	if( *param == '#' && Q_isdigit( param + 1 ) )
+		cl = SV_ClientById( Q_atoi( param + 1 ) );
+	else cl = SV_ClientByName( param );
+
+	if( !cl )
+	{
+		Con_Printf( "Client is not on the server\n" );
 		return;
+	}
 
 	if( NET_IsLocalAddress( cl->netchan.remote_address ))
 	{
@@ -553,9 +604,31 @@ void SV_Kick_f( void )
 		return;
 	}
 
-	Log_Printf( "Kick: \"%s<%i>\" was kicked\n", cl->name, cl->userid );
-	SV_BroadcastPrintf( cl, "%s was kicked\n", cl->name );
-	SV_ClientPrintf( cl, "You were kicked from the game\n" );
+	param = Cmd_Argv( 2 );
+
+	clientId = SV_GetClientIDString( cl );
+
+	if( *param )
+	{
+		Log_Printf( "Kick: \"%s<%i><%s><>\" was kicked by \"Console\" (message \"%s\")\n", cl->name, cl->userid, clientId, param );
+		SV_BroadcastPrintf( cl, "%s was kicked with message: \"%s\"\n", cl->name, param );
+		SV_ClientPrintf( cl, "You were kicked from the game with message: \"%s\"\n", param );
+	}
+	else
+	{
+		Log_Printf( "Kick: \"%s<%i><%s><>\" was kicked by \"Console\"\n", cl->name, cl->userid, clientId );
+		SV_BroadcastPrintf( cl, "%s was kicked\n", cl->name );
+		SV_ClientPrintf( cl, "You were kicked from the game\n" );
+	}
+
+	if( cl->useragent[0] )
+	{
+		if( *param )
+			Netchan_OutOfBandPrint( NS_SERVER, cl->netchan.remote_address, "errormsg\nKicked with message:\n%s\n", param );
+		else
+			Netchan_OutOfBandPrint( NS_SERVER, cl->netchan.remote_address, "errormsg\nYou were kicked from the game\n" );
+	}
+
 	SV_DropClient( cl, false );
 }
 
@@ -608,7 +681,7 @@ void SV_Status_f( void )
 	for( i = 0, cl = svs.clients; i < svs.maxclients; i++, cl++ )
 	{
 		int	j, l;
-		char	*s;
+		const char	*s;
 
 		if( !cl->state ) continue;
 
@@ -641,7 +714,8 @@ SV_ConSay_f
 */
 void SV_ConSay_f( void )
 {
-	char	*p, text[MAX_SYSPATH];
+	const char	*p;
+	char		text[MAX_SYSPATH];
 
 	if( Cmd_Argc() < 2 ) return;
 
@@ -651,18 +725,17 @@ void SV_ConSay_f( void )
 		return;
 	}
 
-	Q_snprintf( text, sizeof( text ), "%s: ", Cvar_VariableString( "hostname" ));
 	p = Cmd_Args();
+	Q_strncpy( text, *p == '"' ? p + 1 : p, MAX_SYSPATH );
 
 	if( *p == '"' )
 	{
-		p++;
-		p[Q_strlen(p) - 1] = 0;
+		text[Q_strlen(text) - 1] = 0;
 	}
 
-	Q_strncat( text, p, MAX_SYSPATH );
+	Log_Printf( "Server say: \"%s\"\n", text );
+	Q_snprintf( text, sizeof( text ), "%s: %s", Cvar_VariableString( "hostname" ), p );
 	SV_BroadcastPrintf( NULL, "%s\n", text );
-	Log_Printf( "Server say: \"%s\"\n", p );
 }
 
 /*
@@ -690,7 +763,7 @@ void SV_ServerInfo_f( void )
 	{
 		Con_Printf( "Server info settings:\n" );
 		Info_Print( svs.serverinfo );
-		Con_Printf( "Total %i symbols\n", Q_strlen( svs.serverinfo ));
+		Con_Printf( "Total %lu symbols\n", Q_strlen( svs.serverinfo ));
 		return;
 	}
 
@@ -706,11 +779,11 @@ void SV_ServerInfo_f( void )
 		return;
 	}
 
-	// if this is a cvar, change it too	
+	// if this is a cvar, change it too
 	var = Cvar_FindVar( Cmd_Argv( 1 ));
 	if( var )
 	{
-		freestring( var->string ); // free the old value string	
+		freestring( var->string ); // free the old value string
 		var->string = copystring( Cmd_Argv( 2 ));
 		var->value = Q_atof( var->string );
 	}
@@ -732,7 +805,7 @@ void SV_LocalInfo_f( void )
 	{
 		Con_Printf( "Local info settings:\n" );
 		Info_Print( svs.localinfo );
-		Con_Printf( "Total %i symbols\n", Q_strlen( svs.localinfo ));
+		Con_Printf( "Total %lu symbols\n", Q_strlen( svs.localinfo ));
 		return;
 	}
 
@@ -775,6 +848,31 @@ void SV_ClientInfo_f( void )
 	Con_Printf( "--------\n" );
 	Info_Print( cl->userinfo );
 
+}
+
+/*
+===========
+SV_ClientUserAgent_f
+
+Examine useragent strings
+===========
+*/
+void SV_ClientUserAgent_f( void )
+{
+	sv_client_t	*cl;
+
+	if( Cmd_Argc() != 2 )
+	{
+		Con_Printf( S_USAGE "clientuseragent <userid>\n" );
+		return;
+	}
+
+	if(( cl = SV_SetPlayer( )) == NULL )
+		return;
+
+	Con_Printf( "useragent\n" );
+	Con_Printf( "---------\n" );
+	Info_Print( cl->useragent );
 }
 
 /*
@@ -821,7 +919,7 @@ void SV_EdictUsage_f( void )
 		return;
 	}
 
-	active = pfnNumberOfEntities(); 
+	active = pfnNumberOfEntities();
 	Con_Printf( "%5i edicts is used\n", active );
 	Con_Printf( "%5i edicts is free\n", GI->max_edicts - active );
 	Con_Printf( "%5i total\n", GI->max_edicts );
@@ -869,6 +967,31 @@ void SV_EntityInfo_f( void )
 		Con_Printf( "\n" );
 	}
 }
+
+/*
+================
+Rcon_Redirect_f
+
+Force redirect N lines of console output to client
+================
+*/
+void Rcon_Redirect_f( void )
+{
+	int lines = 2000;
+
+	if( !host.rd.target )
+	{
+		Msg( "redirect is only valid from rcon\n" );
+		return;
+	}
+
+	if( Cmd_Argc() == 2 )
+		lines = Q_atoi( Cmd_Argv( 1 ) );
+
+	host.rd.lines = lines;
+	Msg( "Redirection enabled for next %d lines\n", lines );
+}
+
 /*
 ==================
 SV_InitHostCommands
@@ -879,18 +1002,19 @@ is available always
 */
 void SV_InitHostCommands( void )
 {
-	Cmd_AddCommand( "map", SV_Map_f, "start new level" );
+	Cmd_AddRestrictedCommand( "map", SV_Map_f, "start new level" );
+	Cmd_AddCommand( "maps", SV_Maps_f, "list maps" );
 
 	if( host.type == HOST_NORMAL )
 	{
-		Cmd_AddCommand( "newgame", SV_NewGame_f, "begin new game" );
-		Cmd_AddCommand( "hazardcourse", SV_HazardCourse_f, "starting a Hazard Course" );
-		Cmd_AddCommand( "map_background", SV_MapBackground_f, "set background map" );
-		Cmd_AddCommand( "load", SV_Load_f, "load a saved game file" );
-		Cmd_AddCommand( "loadquick", SV_QuickLoad_f, "load a quick-saved game file" );
-		Cmd_AddCommand( "reload", SV_Reload_f, "continue from latest save or restart level" );
-		Cmd_AddCommand( "killsave", SV_DeleteSave_f, "delete a saved game file and saveshot" );
-		Cmd_AddCommand( "nextmap", SV_NextMap_f, "load next level" );
+		Cmd_AddRestrictedCommand( "newgame", SV_NewGame_f, "begin new game" );
+		Cmd_AddRestrictedCommand( "hazardcourse", SV_HazardCourse_f, "starting a Hazard Course" );
+		Cmd_AddRestrictedCommand( "map_background", SV_MapBackground_f, "set background map" );
+		Cmd_AddRestrictedCommand( "load", SV_Load_f, "load a saved game file" );
+		Cmd_AddRestrictedCommand( "loadquick", SV_QuickLoad_f, "load a quick-saved game file" );
+		Cmd_AddRestrictedCommand( "reload", SV_Reload_f, "continue from latest save or restart level" );
+		Cmd_AddRestrictedCommand( "killsave", SV_DeleteSave_f, "delete a saved game file and saveshot" );
+		Cmd_AddRestrictedCommand( "nextmap", SV_NextMap_f, "load next level" );
 	}
 }
 
@@ -907,6 +1031,7 @@ void SV_InitOperatorCommands( void )
 	Cmd_AddCommand( "localinfo", SV_LocalInfo_f, "examine or change the localinfo string" );
 	Cmd_AddCommand( "serverinfo", SV_ServerInfo_f, "examine or change the serverinfo string" );
 	Cmd_AddCommand( "clientinfo", SV_ClientInfo_f, "print user infostring (player num required)" );
+	Cmd_AddCommand( "clientuseragent", SV_ClientUserAgent_f, "print user agent (player num required)" );
 	Cmd_AddCommand( "playersonly", SV_PlayersOnly_f, "freezes time, except for players" );
 	Cmd_AddCommand( "restart", SV_Restart_f, "restarting current level" );
 	Cmd_AddCommand( "entpatch", SV_EntPatch_f, "write entity patch to allow external editing" );
@@ -915,6 +1040,9 @@ void SV_InitOperatorCommands( void )
 	Cmd_AddCommand( "shutdownserver", SV_KillServer_f, "shutdown current server" );
 	Cmd_AddCommand( "changelevel", SV_ChangeLevel_f, "change level" );
 	Cmd_AddCommand( "changelevel2", SV_ChangeLevel2_f, "smooth change level" );
+	Cmd_AddCommand( "redirect", Rcon_Redirect_f, "force enable rcon redirection" );
+	Cmd_AddCommand( "logaddress", SV_SetLogAddress_f, "sets address and port for remote logging host" );
+	Cmd_AddCommand( "log", SV_ServerLog_f, "enables logging to file" );
 
 	if( host.type == HOST_NORMAL )
 	{
@@ -949,6 +1077,8 @@ void SV_KillOperatorCommands( void )
 	Cmd_RemoveCommand( "shutdownserver" );
 	Cmd_RemoveCommand( "changelevel" );
 	Cmd_RemoveCommand( "changelevel2" );
+	Cmd_RemoveCommand( "logaddress" );
+	Cmd_RemoveCommand( "log" );
 
 	if( host.type == HOST_NORMAL )
 	{

@@ -15,6 +15,7 @@ GNU General Public License for more details.
 
 #include "common.h"
 #include "custom.h"
+#include "ref_common.h"
 
 qboolean CustomDecal_Validate( void *raw, int nFileSize )
 {
@@ -44,11 +45,13 @@ void COM_ClearCustomizationList( customization_t *pHead, qboolean bCleanDecals )
 
 		if( pCurrent->bInUse && pCurrent->pInfo )
 		{
+#if !XASH_DEDICATED
 			if( pCurrent->resource.type == t_decal )
 			{
 				if( bCleanDecals && CL_Active( ))
-					R_DecalRemoveAll( pCurrent->nUserData1 );
+					ref.dllFuncs.R_DecalRemoveAll( pCurrent->nUserData1 );
 			}
+#endif
 
 			FS_FreeImage( pCurrent->pInfo );
 		}
@@ -61,7 +64,7 @@ void COM_ClearCustomizationList( customization_t *pHead, qboolean bCleanDecals )
 qboolean COM_CreateCustomization( customization_t *pListHead, resource_t *pResource, int playernumber, int flags, customization_t **pOut, int *nLumps )
 {
 	qboolean		bError = false;
-	int		checksize = 0;
+	fs_offset_t		checksize = 0;
 	customization_t	*pCust;
 
 	if( pOut ) *pOut = NULL;
@@ -83,7 +86,7 @@ qboolean COM_CreateCustomization( customization_t *pListHead, resource_t *pResou
 	{
 
 		pCust->pBuffer = FS_LoadFile( pResource->szFileName, &checksize, true );
-		if( checksize != pCust->resource.nDownloadSize )
+		if( (int)checksize != pCust->resource.nDownloadSize )
 			bError = true;
 	}
 

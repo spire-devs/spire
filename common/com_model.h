@@ -16,10 +16,8 @@ GNU General Public License for more details.
 #ifndef COM_MODEL_H
 #define COM_MODEL_H
 
+#include "xash3d_types.h"
 #include "bspfile.h"	// we need some declarations from it
-
-typedef vec_t		vec2_t[2];
-typedef vec_t		vec4_t[4];
 
 /*
 ==============================================================================
@@ -34,16 +32,17 @@ typedef vec_t		vec4_t[4];
 
 #define MIPLEVELS		4
 #define VERTEXSIZE		7
-#define MAXLIGHTMAPS	4
+#define MAXLIGHTMAPS	4	// max light styles per face
+#define MAXDYNLIGHTS	8	// maximum dynamic lights per one pixel
 #define NUM_AMBIENTS	4		// automatic ambient sounds
 
 // model types
 typedef enum
 {
 	mod_bad = -1,
-	mod_brush, 
-	mod_sprite, 
-	mod_alias, 
+	mod_brush,
+	mod_sprite,
+	mod_alias,
 	mod_studio
 } modtype_t;
 
@@ -94,7 +93,7 @@ typedef struct texture_s
 	struct texture_s	*alternate_anims;	// bmodels in frame 1 use these
 	unsigned short	fb_texturenum;	// auto-luma texturenum
 	unsigned short	dt_texturenum;	// detail-texture binding
-	unsigned int	unused[3];	// reserved 
+	unsigned int	unused[3];	// reserved
 } texture_t;
 
 typedef struct
@@ -108,6 +107,15 @@ typedef struct
 
 	int		reserved[32];	// just for future expansions or mod-makers
 } mfaceinfo_t;
+
+typedef struct
+{
+	mplane_t		*edges;
+	int		numedges;
+	vec3_t		origin;
+	vec_t		radius;		// for culling tests
+	int		contents;		// sky or solid
+} mfacebevel_t;
 
 typedef struct
 {
@@ -139,7 +147,7 @@ typedef struct mnode_s
 
 // node specific
 	mplane_t		*plane;
-	struct mnode_s	*children[2];	
+	struct mnode_s	*children[2];
 #ifdef SUPPORT_BSP2_FORMAT
 	int		firstsurface;
 	int		numsurfaces;
@@ -158,7 +166,7 @@ struct decal_s
 	decal_t		*pnext;		// linked list for each surface
 	msurface_t	*psurface;	// Surface id for persistence / unlinking
 	float		dx;		// local texture coordinates
-	float		dy;		// 
+	float		dy;		//
 	float		scale;		// Pixel scale
 	short		texture;		// Decal texture
 	short		flags;		// Decal flags  FDECAL_*
@@ -208,7 +216,7 @@ typedef struct mextrasurf_s
 // begin userdata
 	struct msurface_s	*lightmapchain;	// lightmapped polys
 	struct mextrasurf_s	*detailchain;	// for detail textures drawing
-	struct mextrasurf_s	*mirrorchain;	// for gl_texsort drawing
+	mfacebevel_t	*bevel;		// for exact face traceline
 	struct mextrasurf_s	*lumachain;	// draw fullbrights
 	struct cl_entity_s	*parent;		// upcast to owner entity
 
@@ -223,7 +231,7 @@ typedef struct mextrasurf_s
 	int		reserved[32];	// just for future expansions or mod-makers
 } mextrasurf_t;
 
-typedef struct msurface_s
+struct msurface_s
 {
 	int		visframe;		// should be drawn when node is crossed
 
@@ -255,7 +263,7 @@ typedef struct msurface_s
 
 	color24		*samples;		// note: this is the actual lightmap data for this surface
 	decal_t		*pdecals;
-} msurface_t;
+};
 
 typedef struct hull_s
 {
@@ -283,7 +291,7 @@ typedef struct model_s
 	// shared modelinfo
 	modtype_t		type;		// model type
 	int		numframes;	// sprite's framecount
-	byte		*mempool;		// private mempool (was synctype)
+	poolhandle_t mempool;		// private mempool (was synctype)
 	int		flags;		// hl compatibility
 
 //
@@ -291,7 +299,7 @@ typedef struct model_s
 //
 	vec3_t		mins, maxs;	// bounding box at angles '0 0 0'
 	float		radius;
-    
+
 	// brush model
 	int		firstmodelsurface;
 	int		nummodelsurfaces;
@@ -378,7 +386,7 @@ typedef struct player_info_s
 	int		bottomcolor;
 
 	// last frame rendered
-	int		renderframe;	
+	int		renderframe;
 
 	// Gait frame estimation
 	int		gaitsequence;
@@ -494,5 +502,37 @@ typedef struct
 
 	maliasframedesc_t	frames[1];	// variable sized
 } aliashdr_t;
+
+
+
+// remapping info
+#define SUIT_HUE_START		192
+#define SUIT_HUE_END		223
+#define PLATE_HUE_START		160
+#define PLATE_HUE_END		191
+
+#define SHIRT_HUE_START		16
+#define SHIRT_HUE_END		32
+#define PANTS_HUE_START		96
+#define PANTS_HUE_END		112
+
+
+// 1/32 epsilon to keep floating point happy
+#define DIST_EPSILON		(1.0f / 32.0f)
+#define FRAC_EPSILON		(1.0f / 1024.0f)
+#define BACKFACE_EPSILON		0.01f
+#define MAX_BOX_LEAFS		256
+#define ANIM_CYCLE			2
+#define MOD_FRAMES			20
+
+
+
+#define MAX_DEMOS		32
+#define MAX_MOVIES		8
+#define MAX_CDTRACKS	32
+#define MAX_CLIENT_SPRITES	512	// SpriteTextures (0-256 hud, 256-512 client)
+#define MAX_EFRAGS		8192	// Arcane Dimensions required
+#define MAX_REQUESTS	64
+
 
 #endif//COM_MODEL_H

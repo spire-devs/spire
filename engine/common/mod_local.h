@@ -16,28 +16,11 @@ GNU General Public License for more details.
 #ifndef MOD_LOCAL_H
 #define MOD_LOCAL_H
 
-#include "common.h"
+//#include "common.h"
 #include "edict.h"
 #include "eiface.h"
-
-// 1/32 epsilon to keep floating point happy
-#define DIST_EPSILON		(1.0f / 32.0f)
-#define FRAC_EPSILON		(1.0f / 1024.0f)
-#define BACKFACE_EPSILON		0.01f
-#define MAX_BOX_LEAFS		256
-#define ANIM_CYCLE			2
-#define MOD_FRAMES			20
-
-// remapping info
-#define SUIT_HUE_START		192
-#define SUIT_HUE_END		223
-#define PLATE_HUE_START		160
-#define PLATE_HUE_END		191
-
-#define SHIRT_HUE_START		16
-#define SHIRT_HUE_END		32
-#define PANTS_HUE_START		96
-#define PANTS_HUE_END		112
+#include "ref_api.h"
+#include "studio.h"
 
 #define LM_SAMPLE_SIZE		16
 #define LM_SAMPLE_EXTRASIZE		8
@@ -53,22 +36,6 @@ GNU General Public License for more details.
 #define FATPHS_RADIUS		16.0f
 
 #define WORLD_INDEX			(1)	// world index is always 1
-
-// model flags (stored in model_t->flags)
-#define MODEL_CONVEYOR		BIT( 0 )
-#define MODEL_HAS_ORIGIN		BIT( 1 )
-#define MODEL_LIQUID		BIT( 2 )	// model has only point hull
-#define MODEL_TRANSPARENT		BIT( 3 )	// have transparent surfaces
-#define MODEL_COLORED_LIGHTING	BIT( 4 )	// lightmaps stored as RGB
-
-#define MODEL_WORLD			BIT( 29 )	// it's a worldmodel
-#define MODEL_CLIENT		BIT( 30 )	// client sprite
-
-// goes into world.flags
-#define FWORLD_SKYSPHERE		BIT( 0 )
-#define FWORLD_CUSTOM_SKYBOX		BIT( 1 )
-#define FWORLD_WATERALPHA		BIT( 2 )
-#define FWORLD_HAS_DELUXEMAP		BIT( 3 )
 
 typedef struct consistency_s
 {
@@ -116,13 +83,8 @@ typedef struct
 	uint		num_polys;
 } hull_model_t;
 
-typedef struct
-{
-	msurface_t	*surf;
-	int		cull;
-} sortedface_t;
 
-typedef struct
+typedef struct world_static_s
 {
 	qboolean		loading;		// true if worldmodel is loading
 	int		flags;		// misc flags
@@ -132,12 +94,12 @@ typedef struct
 	char		compiler[256];	// map compiler
 	char		generator[256];	// map editor
 
-	// translucent sorted array
-	sortedface_t	*draw_surfaces;	// used for sorting translucent surfaces
-	int		max_surfaces;	// max surfaces per submodel (for all models)
-
 	hull_model_t	*hull_models;
 	int		num_hull_models;
+
+	// out pointers to light data
+	color24		*deluxedata;	// deluxemap data pointer
+	byte		*shadowdata;	// occlusion data pointer
 
 	// visibility info
 	size_t		visbytes;		// cluster size
@@ -147,10 +109,15 @@ typedef struct
 	vec3_t		mins;		// real accuracy world bounds
 	vec3_t		maxs;
 	vec3_t		size;
+
+	// tree visualization stuff
+	int		recursion_level;
+	int		max_recursion;
 } world_static_t;
 
+#ifndef REF_DLL
 extern world_static_t	world;
-extern byte		*com_studiocache;
+extern poolhandle_t     com_studiocache;
 extern model_t		*loadmodel;
 extern convar_t		*mod_studiocache;
 extern convar_t		*r_wadtextures;
@@ -160,6 +127,7 @@ extern convar_t		*r_showhull;
 // model.c
 //
 void Mod_Init( void );
+void Mod_FreeModel( model_t *mod );
 void Mod_FreeAll( void );
 void Mod_Shutdown( void );
 void Mod_ClearUserData( void );
@@ -204,6 +172,8 @@ void Mod_ReleaseHullPolygons( void );
 //
 // mod_studio.c
 //
+void Mod_LoadStudioModel( model_t *mod, const void *buffer, qboolean *loaded );
+void Mod_UnloadStudioModel( model_t *mod );
 void Mod_InitStudioAPI( void );
 void Mod_InitStudioHull( void );
 void Mod_ResetStudioAPI( void );
@@ -213,13 +183,17 @@ void Mod_StudioGetAttachment( const edict_t *e, int iAttachment, float *org, flo
 void Mod_GetBonePosition( const edict_t *e, int iBone, float *org, float *ang );
 hull_t *Mod_HullForStudio( model_t *m, float frame, int seq, vec3_t ang, vec3_t org, vec3_t size, byte *pcnt, byte *pbl, int *hitboxes, edict_t *ed );
 void R_StudioSlerpBones( int numbones, vec4_t q1[], float pos1[][3], vec4_t q2[], float pos2[][3], float s );
-void R_StudioCalcBoneQuaternion( int frame, float s, void *pbone, void *panim, float *adj, vec4_t q );
-void R_StudioCalcBonePosition( int frame, float s, void *pbone, void *panim, vec3_t adj, vec3_t pos );
-void *R_StudioGetAnim( void *m_pStudioHeader, void *m_pSubModel, void *pseqdesc );
+void R_StudioCalcBoneQuaternion( int frame, float s, mstudiobone_t *pbone, mstudioanim_t *panim, float *adj, vec4_t q );
+void R_StudioCalcBonePosition( int frame, float s, mstudiobone_t *pbone, mstudioanim_t *panim, vec3_t adj, vec3_t pos );
+void *R_StudioGetAnim( studiohdr_t *m_pStudioHeader, model_t *m_pSubModel, mstudioseqdesc_t *pseqdesc );
 void Mod_StudioComputeBounds( void *buffer, vec3_t mins, vec3_t maxs, qboolean ignore_sequences );
-void Mod_StudioLoadTextures( model_t *mod, void *data );
-void Mod_StudioUnloadTextures( void *data );
 int Mod_HitgroupForStudioHull( int index );
 void Mod_ClearStudioCache( void );
+
+//
+// mod_sprite.c
+//
+void Mod_LoadSpriteModel( model_t *mod, const void *buffer, qboolean *loaded, uint texFlags );
+#endif
 
 #endif//MOD_LOCAL_H

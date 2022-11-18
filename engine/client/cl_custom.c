@@ -39,9 +39,9 @@ qboolean CL_CheckFile( sizebuf_t *msg, resource_t *pResource )
 	}
 
 	if( pResource->type == t_sound )
-		Q_strncpy( filepath, va( "%s%s", DEFAULT_SOUNDPATH, pResource->szFileName ), sizeof( filepath ));
+		Q_snprintf( filepath, sizeof( filepath ), DEFAULT_SOUNDPATH "%s", pResource->szFileName );
 	else Q_strncpy( filepath, pResource->szFileName, sizeof( filepath ));
- 
+
 	if( !COM_IsSafeFileToDownload( filepath ))
 	{
 		Con_Reportf( "refusing to download %s\n", filepath );
@@ -68,6 +68,13 @@ qboolean CL_CheckFile( sizebuf_t *msg, resource_t *pResource )
 	{
 		Con_Reportf( S_WARN "file %s missing during demo playback.\n", filepath );
 		return true;
+	}
+
+	if( cl.downloadUrl[0] )
+	{
+		HTTP_AddDownload( filepath, pResource->nDownloadSize, true );
+		host.downloadcount++;
+		return false;
 	}
 
 	MSG_BeginClientCmd( msg, clc_stringcmd );
@@ -99,7 +106,7 @@ void CL_RemoveFromResourceList( resource_t *pResource )
 	if( pResource->pPrev == NULL || pResource->pNext == NULL )
 		Host_Error( "mislinked resource in CL_RemoveFromResourceList\n" );
 
-	if ( pResource->pNext == pResource || pResource->pPrev == pResource )
+	if( pResource->pNext == pResource || pResource->pPrev == pResource )
 		Host_Error( "attempt to free last entry in list.\n" );
 
 	pResource->pPrev->pNext = pResource->pNext;

@@ -16,7 +16,7 @@ GNU General Public License for more details.
 #ifndef NET_BUFFER_H
 #define NET_BUFFER_H
 
-#include "features.h"
+#include "enginefeatures.h"
 
 /*
 ==============================================================================
@@ -35,7 +35,7 @@ _inline int BitByte( int bits )
 	return PAD_NUMBER( bits, 8 ) >> 3;
 }
 
-typedef struct sizebuf_s
+struct sizebuf_s
 {
 	qboolean		bOverflow;	// overflow reading or writing
 	const char	*pDebugName;	// buffer name (pointer to const name)
@@ -43,7 +43,7 @@ typedef struct sizebuf_s
 	byte		*pData;
 	int		iCurBit;
 	int		nDataBits;
-} sizebuf_t;
+};
 
 #define MSG_StartReading			MSG_StartWriting
 #define MSG_GetNumBytesRead			MSG_GetNumBytesWritten
@@ -63,7 +63,7 @@ void MSG_ExciseBits( sizebuf_t *sb, int startbit, int bitstoremove );
 _inline int MSG_TellBit( sizebuf_t *sb ) { return sb->iCurBit; }
 _inline const char *MSG_GetName( sizebuf_t *sb ) { return sb->pDebugName; }
 qboolean MSG_CheckOverflow( sizebuf_t *sb );
-short MSG_BigShort( short swap );
+unsigned short MSG_BigShort( unsigned short swap );
 
 // init writing
 void MSG_StartWriting( sizebuf_t *sb, void *pData, int nBytes, int iStartBit, int nBits );
@@ -86,7 +86,7 @@ void MSG_WriteChar( sizebuf_t *sb, int val );
 void MSG_WriteByte( sizebuf_t *sb, int val );
 void MSG_WriteShort( sizebuf_t *sb, int val );
 void MSG_WriteWord( sizebuf_t *sb, int val );
-void MSG_WriteLong( sizebuf_t *sb, long val );
+void MSG_WriteLong( sizebuf_t *sb, int val );
 void MSG_WriteDword( sizebuf_t *sb, dword val );
 void MSG_WriteCoord( sizebuf_t *sb, float val );
 void MSG_WriteFloat( sizebuf_t *sb, float val );
@@ -123,7 +123,7 @@ int MSG_ReadChar( sizebuf_t *sb );
 int MSG_ReadByte( sizebuf_t *sb );
 int MSG_ReadShort( sizebuf_t *sb );
 int MSG_ReadWord( sizebuf_t *sb );
-long MSG_ReadLong( sizebuf_t *sb );
+int MSG_ReadLong( sizebuf_t *sb );
 dword MSG_ReadDword( sizebuf_t *sb );
 float MSG_ReadCoord( sizebuf_t *sb );
 float MSG_ReadFloat( sizebuf_t *sb );
@@ -131,5 +131,5 @@ void MSG_ReadVec3Coord( sizebuf_t *sb, vec3_t fa );
 void MSG_ReadVec3Angles( sizebuf_t *sb, vec3_t fa );
 qboolean MSG_ReadBytes( sizebuf_t *sb, void *pOut, int nBytes );
 char *MSG_ReadStringExt( sizebuf_t *sb, qboolean bLine );
-					
+
 #endif//NET_BUFFER_H

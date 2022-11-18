@@ -14,7 +14,7 @@ GNU General Public License for more details.
 */
 
 #include "common.h"
-#include "filesystem.h"
+#include "hpak.h"
 
 #define HPAK_MAX_ENTRIES	0x8000
 #define HPAK_MIN_SIZE	(1 * 1024)
@@ -44,9 +44,21 @@ const char *HPAK_TypeFromIndex( int type )
 	case t_decal: return "decal";
 	case t_generic: return "generic";
 	case t_eventscript: return "event";
-	case t_world: return "map";	
+	case t_world: return "map";
 	}
 	return "?";
+}
+
+static inline void HPAK_ResourceToCompat( dresource_t *dest, resource_t *src )
+{
+	memcpy( dest, src, sizeof( *dest ));
+	dest->pNext = dest->pPrev = 0xDEADBEEF;
+}
+
+static inline void HPAK_ResourceFromCompat( resource_t *dest, dresource_t *src )
+{
+	memcpy( dest, src, sizeof( *src ));
+	dest->pNext = dest->pPrev = (void*)0xDEADBEEF;
 }
 
 static void HPAK_AddToQueue( const char *name, resource_t *pResource, void *data, file_t *f )
@@ -86,10 +98,10 @@ void HPAK_CreatePak( const char *filename, resource_t *pResource, byte *pData, f
 {
 	int		filelocation;
 	string		pakname;
-	char		md5[16];
-	char		*temp;
+	byte		md5[16];
 	file_t		*fout;
 	MD5Context_t	ctx;
+	dresource_t	dresource;
 
 	if( !COM_CheckString( filename ))
 		return;
@@ -115,6 +127,8 @@ void HPAK_CreatePak( const char *filename, resource_t *pResource, byte *pData, f
 
 	if( pData == NULL )
 	{
+		byte *temp;
+
 		// there are better ways
 		filelocation = FS_Tell( fin );
 		temp = Z_Malloc( pResource->nDownloadSize );
@@ -144,7 +158,7 @@ void HPAK_CreatePak( const char *filename, resource_t *pResource, byte *pData, f
 
 	hash_pack_info.count = 1;
 	hash_pack_info.entries = Z_Malloc( sizeof( hpak_lump_t ));
-	hash_pack_info.entries[0].resource = *pResource;
+	HPAK_ResourceToCompat( &hash_pack_info.entries[0].resource, pResource );
 	hash_pack_info.entries[0].filepos = FS_Tell( fout );
 	hash_pack_info.entries[0].disksize = pResource->nDownloadSize;
 
@@ -180,7 +194,7 @@ static qboolean HPAK_FindResource( hpak_info_t *hpk, byte *hash, resource_t *pRe
 		if( !memcmp( hpk->entries[i].resource.rgucMD5_hash, hash, 16 ))
 		{
 			if( pResource )
-				*pResource = hpk->entries[i].resource;
+				HPAK_ResourceFromCompat( pResource, &hpk->entries[i].resource );
 			return true;
 		}
 	}
@@ -196,8 +210,7 @@ void HPAK_AddLump( qboolean bUseQueue, const char *name, resource_t *pResource, 
 	hpak_info_t	srcpak, dstpak;
 	file_t		*file_src;
 	file_t		*file_dst;
-	char		md5[16];
-	byte		*temp;
+	byte		md5[16];
 	MD5Context_t	ctx;
 
 	if( pData == NULL && pFile == NULL )
@@ -215,6 +228,8 @@ void HPAK_AddLump( qboolean bUseQueue, const char *name, resource_t *pResource, 
 
 	if( pData == NULL )
 	{
+		byte		*temp;
+
 		// there are better ways
 		position = FS_Tell( pFile );
 		temp = Z_Malloc( pResource->nDownloadSize );
@@ -275,6 +290,7 @@ void HPAK_AddLump( qboolean bUseQueue, const char *name, resource_t *pResource, 
 		Con_DPrintf( S_ERROR "HPAK_AddLump: %s does not have a valid header.\n", srcname );
 		FS_Close( file_src );
 		FS_Close( file_dst );
+		return;
 	}
 
 	length = FS_FileLength( file_src );
@@ -295,12 +311,12 @@ void HPAK_AddLump( qboolean bUseQueue, const char *name, resource_t *pResource, 
 	// load the data
 	srcpak.entries = Z_Malloc( sizeof( hpak_lump_t ) * srcpak.count );
 	FS_Read( file_src, srcpak.entries, sizeof( hpak_lump_t ) * srcpak.count );
-	FS_Close( file_src );
 
 	// check if already exists
 	if( HPAK_FindResource( &srcpak, pResource->rgucMD5_hash, NULL ))
 	{
 		Z_Free( srcpak.entries );
+		FS_Close( file_src );
 		FS_Close( file_dst );
 		FS_Delete( dstname );
 		return;
@@ -327,7 +343,7 @@ void HPAK_AddLump( qboolean bUseQueue, const char *name, resource_t *pResource, 
 
 	memset( pCurrentEntry, 0, sizeof( hpak_lump_t ));
 	FS_Seek( file_dst, hash_pack_header.infotableofs, SEEK_SET );
-	pCurrentEntry->resource = *pResource;
+	HPAK_ResourceToCompat( &pCurrentEntry->resource, pResource );
 	pCurrentEntry->filepos = FS_Tell( file_dst );
 	pCurrentEntry->disksize = pResource->nDownloadSize;
 
@@ -350,6 +366,8 @@ void HPAK_AddLump( qboolean bUseQueue, const char *name, resource_t *pResource, 
 
 	FS_Seek( file_dst, 0, SEEK_SET );
 	FS_Write( file_dst, &hash_pack_header, sizeof( hpak_header_t ));
+
+	FS_Close( file_src );
 	FS_Close( file_dst );
 
 	FS_Delete( srcname );
@@ -365,13 +383,13 @@ static qboolean HPAK_Validate( const char *filename, qboolean quiet )
 	int		i, num_lumps;
 	MD5Context_t	MD5_Hash;
 	string		pakname;
-	resource_t	*pRes;
-	char		md5[16];
+	dresource_t	*pRes;
+	byte		md5[16];
 
 	if( quiet ) HPAK_FlushHostQueue();
 
 	// not an error - just flush queue
-	if( !filename || !*filename )
+	if( !COM_CheckString( filename ) )
 		return true;
 
 	Q_strncpy( pakname, filename, sizeof( pakname ));
@@ -397,7 +415,7 @@ static qboolean HPAK_Validate( const char *filename, qboolean quiet )
 	FS_Seek( f, hdr.infotableofs, SEEK_SET );
 	FS_Read( f, &num_lumps, sizeof( num_lumps ));
 
-	if( num_lumps < 1 || num_lumps > MAX_FILES_IN_WAD )
+	if( num_lumps < 1 || num_lumps > HPAK_MAX_ENTRIES )
 	{
 		Con_DPrintf( S_ERROR "HPAK_ValidatePak: %s has too many lumps %u.\n", pakname, num_lumps );
 		FS_Close( f );
@@ -434,7 +452,7 @@ static qboolean HPAK_Validate( const char *filename, qboolean quiet )
 		pRes = &dataDir[i].resource;
 
 		Con_Printf( "%i:      %s %s %s:   ", i, HPAK_TypeFromIndex( pRes->type ),
-		Q_pretifymem( pRes->nDownloadSize, 2 ), pRes->szFileName );  
+		Q_pretifymem( pRes->nDownloadSize, 2 ), pRes->szFileName );
 
 		if( memcmp( md5, pRes->rgucMD5_hash, 0x10 ))
 		{
@@ -471,7 +489,7 @@ void HPAK_CheckIntegrity( const char *filename )
 {
 	string	pakname;
 
-	if( !filename || !filename[0] )
+	if( !COM_CheckString( filename ) )
 		return;
 
 	Q_strncpy( pakname, filename, sizeof( pakname ));
@@ -488,7 +506,7 @@ void HPAK_CheckSize( const char *filename )
 	maxsize = hpk_maxsize->value;
 	if( maxsize <= 0 ) return;
 
-	if( !filename || !filename[0] )
+	if( !COM_CheckString( filename ) )
 		return;
 
 	Q_strncpy( pakname, filename, sizeof( pakname ));
@@ -513,7 +531,7 @@ qboolean HPAK_ResourceForHash( const char *filename, byte *hash, resource_t *pRe
 
 	if( !COM_CheckString( filename ))
 		return false;
-	
+
 	for( p = gp_hpak_queue; p != NULL; p = p->next )
 	{
 		if( !Q_stricmp( p->name, filename ) && !memcmp( p->resource.rgucMD5_hash, hash, 16 ))
@@ -569,7 +587,7 @@ static qboolean HPAK_ResourceForIndex( const char *filename, int index, resource
 	string		pakname;
 	file_t		*f;
 
-	if( !filename || !filename[0] )
+	if( !COM_CheckString( filename ) )
 		return false;
 
 	Q_strncpy( pakname, filename, sizeof( pakname ));
@@ -616,7 +634,7 @@ static qboolean HPAK_ResourceForIndex( const char *filename, int index, resource
 
 	directory.entries = Z_Malloc( sizeof( hpak_lump_t ) * directory.count );
 	FS_Read( f, directory.entries, sizeof( hpak_lump_t ) * directory.count );
-	*pResource = directory.entries[index-1].resource;
+	HPAK_ResourceFromCompat( pResource, &directory.entries[index-1].resource );
 	Z_Free( directory.entries );
 	FS_Close( f );
 
@@ -642,7 +660,7 @@ qboolean HPAK_GetDataPointer( const char *filename, resource_t *pResource, byte 
 
 	for( p = gp_hpak_queue; p != NULL; p = p->next )
 	{
-		if( !Q_stricmp(p->name, filename ) && !memcmp( p->resource.rgucMD5_hash, pResource->rgucMD5_hash, 16 ))
+		if( !Q_stricmp( p->name, filename ) && !memcmp( p->resource.rgucMD5_hash, pResource->rgucMD5_hash, 16 ))
 		{
 			if( buffer )
 			{
@@ -697,11 +715,13 @@ qboolean HPAK_GetDataPointer( const char *filename, resource_t *pResource, byte 
 	{
 		entry = &directory.entries[i];
 
-		if( !memcmp( entry->resource.rgucMD5_hash, pResource->rgucMD5_hash, 16 ))
+		if( entry->filepos > 0 &&
+			entry->disksize > 0 &&
+			!memcmp( entry->resource.rgucMD5_hash, pResource->rgucMD5_hash, 16 ))
 		{
 			FS_Seek( f, entry->filepos, SEEK_SET );
 
-			if( buffer && entry->disksize > 0 )
+			if( buffer )
 			{
 				tmpbuf = Z_Malloc( entry->disksize );
 				FS_Read( f, tmpbuf, entry->disksize );
@@ -806,7 +826,7 @@ void HPAK_RemoveLump( const char *name, resource_t *pResource )
 
 	if( !HPAK_FindResource( &hpak_read, pResource->rgucMD5_hash, NULL ))
 	{
-		Con_DPrintf( S_ERROR "HPAK doesn't contain specified lump: %s\n", pResource->szFileName, read_path );
+		Con_DPrintf( S_ERROR "HPAK %s doesn't contain specified lump: %s\n", read_path, pResource->szFileName );
 		Mem_Free( hpak_read.entries );
 		Mem_Free( hpak_save.entries );
 		FS_Close( file_src );
@@ -1072,10 +1092,10 @@ void HPAK_Validate_f( void )
 
 void HPAK_Init( void )
 {
-	Cmd_AddCommand( "hpklist", HPAK_List_f, "list all files in specified HPK-file" );
-	Cmd_AddCommand( "hpkremove", HPAK_Remove_f, "remove specified file from HPK-file" );
-	Cmd_AddCommand( "hpkval", HPAK_Validate_f, "validate specified HPK-file" );
-	Cmd_AddCommand( "hpkextract", HPAK_Extract_f, "extract all lumps from specified HPK-file" );
+	Cmd_AddRestrictedCommand( "hpklist", HPAK_List_f, "list all files in specified HPK-file" );
+	Cmd_AddRestrictedCommand( "hpkremove", HPAK_Remove_f, "remove specified file from HPK-file" );
+	Cmd_AddRestrictedCommand( "hpkval", HPAK_Validate_f, "validate specified HPK-file" );
+	Cmd_AddRestrictedCommand( "hpkextract", HPAK_Extract_f, "extract all lumps from specified HPK-file" );
 	hpk_maxsize = Cvar_Get( "hpk_maxsize", "0", FCVAR_ARCHIVE, "set limit by size for all HPK-files ( 0 - unlimited )" );
 
 	gp_hpak_queue = NULL;

@@ -17,7 +17,6 @@ GNU General Public License for more details.
 #include "client.h"
 #include "net_encode.h"
 #include "particledef.h"
-#include "gl_local.h"
 #include "cl_tent.h"
 #include "shake.h"
 #include "hltv.h"
@@ -86,7 +85,7 @@ static qboolean CL_QuakeEntityTeleported( cl_entity_t *ent, entity_state_t *news
 	VectorSubtract( newstate->origin, ent->prevstate.origin, delta );
 
 	// compute potential max movement in units per frame and compare with entity movement
-	maxlen = ( clgame.movevars.maxvelocity * ( 1.0 / GAME_FPS ));
+	maxlen = ( clgame.movevars.maxvelocity * ( 1.0f / GAME_FPS ));
 	len = VectorLength( delta );
 
 	return (len > maxlen);
@@ -225,7 +224,7 @@ static void CL_ParseQuakeServerInfo( sizebuf_t *msg )
 	}
 
 	// multiplayer game?
-	if( cl.maxclients > 1 )	
+	if( cl.maxclients > 1 )
 	{
 		// allow console in multiplayer games
 		host.allow_console = true;
@@ -237,10 +236,6 @@ static void CL_ParseQuakeServerInfo( sizebuf_t *msg )
 			Cvar_SetValue( "r_decals", mp_decals.value );
 	}
 	else Cvar_Reset( "r_decals" );
-
-	// re-init mouse
-	if( cl.background )
-		host.mouse_visible = false;
 
 	if( cl.background )	// tell the game parts about background state
 		Cvar_FullSet( "cl_background", "1", FCVAR_READ_ONLY );
@@ -303,13 +298,13 @@ static void CL_ParseQuakeServerInfo( sizebuf_t *msg )
 
 	// get splash name
 	if( cls.demoplayback && ( cls.demonum != -1 ))
-		Cvar_Set( "cl_levelshot_name", va( "levelshots/%s_%s", cls.demoname, glState.wideScreen ? "16x9" : "4x3" ));
-	else Cvar_Set( "cl_levelshot_name", va( "levelshots/%s_%s", clgame.mapname, glState.wideScreen ? "16x9" : "4x3" ));
+		Cvar_Set( "cl_levelshot_name", va( "levelshots/%s_%s", cls.demoname, refState.wideScreen ? "16x9" : "4x3" ));
+	else Cvar_Set( "cl_levelshot_name", va( "levelshots/%s_%s", clgame.mapname, refState.wideScreen ? "16x9" : "4x3" ));
 	Cvar_SetValue( "scr_loading", 0.0f ); // reset progress bar
 
 	if(( cl_allow_levelshots->value && !cls.changelevel ) || cl.background )
 	{
-		if( !FS_FileExists( va( "%s.bmp", cl_levelshot_name->string ), true )) 
+		if( !FS_FileExists( va( "%s.bmp", cl_levelshot_name->string ), true ))
 			Cvar_Set( "cl_levelshot_name", "*black" ); // render a black screen
 		cls.scrshot_request = scrshot_plaque; // request levelshot even if exist (check filetime)
 	}
@@ -350,11 +345,11 @@ static void CL_ParseQuakeClientData( sizebuf_t *msg )
 	// this is the frame update that this message corresponds to
 	i = cls.netchan.incoming_sequence;
 
-	cl.parsecount = i;					// ack'd incoming messages.  
-	cl.parsecountmod = cl.parsecount & CL_UPDATE_MASK;	// index into window.     
+	cl.parsecount = i;					// ack'd incoming messages.
+	cl.parsecountmod = cl.parsecount & CL_UPDATE_MASK;	// index into window.
 	frame = &cl.frames[cl.parsecountmod];			// frame at index.
 	frame->time = cl.mtime[0];				// mark network received time
-	frame->receivedtime = host.realtime;			// time now that we are parsing.  
+	frame->receivedtime = host.realtime;			// time now that we are parsing.
 	memset( &frame->graphdata, 0, sizeof( netbandwidthgraph_t ));
 	memset( frame->flags, 0, sizeof( frame->flags ));
 	frame->first_entity = cls.next_client_entities;
@@ -449,7 +444,7 @@ void CL_ParseQuakeEntityData( sizebuf_t *msg, int bits )
 		SetBits( bits, i << 8 );
 	}
 
-	if( FBitSet( bits, U_LONGENTITY ))	
+	if( FBitSet( bits, U_LONGENTITY ))
 		newnum = MSG_ReadWord( msg );
 	else newnum = MSG_ReadByte( msg );
 
@@ -466,7 +461,7 @@ void CL_ParseQuakeEntityData( sizebuf_t *msg, int bits )
 	if( ent->curstate.msg_time != cl.mtime[1] )
 		forcelink = true;	// no previous frame to lerp from
 	else forcelink = false;
-	
+
 	if( FBitSet( bits, U_MODEL ))
 		state->modelindex = MSG_ReadByte( msg );
 	else state->modelindex = ent->baseline.modelindex;
@@ -574,8 +569,8 @@ void CL_ParseQuakeParticle( sizebuf_t *msg )
 {
 	int	count, color;
 	vec3_t	org, dir;
-	
-	MSG_ReadVec3Coord( msg, org );	
+
+	MSG_ReadVec3Coord( msg, org );
 	dir[0] = MSG_ReadChar( msg ) * 0.0625f;
 	dir[1] = MSG_ReadChar( msg ) * 0.0625f;
 	dir[2] = MSG_ReadChar( msg ) * 0.0625f;
@@ -598,12 +593,12 @@ void CL_ParseQuakeStaticSound( sizebuf_t *msg )
 	float 	vol, attn;
 	vec3_t	org;
 
-	MSG_ReadVec3Coord( msg, org );	
+	MSG_ReadVec3Coord( msg, org );
 	sound_num = MSG_ReadByte( msg );
 	vol = (float)MSG_ReadByte( msg ) / 255.0f;
 	attn = (float)MSG_ReadByte( msg ) / 64.0f;
 
-	S_StartSound( org, 0, CHAN_STATIC, cl.sound_index[sound_num], vol, attn, PITCH_NORM, 0 );	
+	S_StartSound( org, 0, CHAN_STATIC, cl.sound_index[sound_num], vol, attn, PITCH_NORM, 0 );
 }
 
 /*
@@ -677,7 +672,7 @@ static void CL_ParseQuakeStaticEntity( sizebuf_t *msg )
 	if( ent->model != NULL )
 	{
 		// auto 'solid' faces
-		if( FBitSet( ent->model->flags, MODEL_TRANSPARENT ) && CL_IsQuakeCompatible( ))
+		if( FBitSet( ent->model->flags, MODEL_TRANSPARENT ) && Host_IsQuakeCompatible())
 		{
 			ent->curstate.rendermode = kRenderTransAlpha;
 			ent->curstate.renderamt = 255;
@@ -826,6 +821,9 @@ CL_QuakeStuffText
 void CL_QuakeStuffText( const char *text )
 {
 	Q_strncat( cmd_buf, text, sizeof( cmd_buf ));
+
+	// a1ba: didn't filtered, anyway quake protocol
+	// only supported for demos, not network games
 	Cbuf_AddText( text );
 }
 
@@ -862,9 +860,7 @@ void CL_QuakeExecStuff( void )
 
 		if( !*text ) break;
 
-		host.com_ignorebracket = true;
-		text = COM_ParseFile( text, token );
-		host.com_ignorebracket = false;
+		text = COM_ParseFileSafe( text, token, sizeof( token ), PFILE_IGNOREBRACKET, NULL, NULL );
 
 		if( !text ) break;
 
@@ -909,7 +905,7 @@ void CL_ParseQuakeMessage( sizebuf_t *msg, qboolean normal_message )
 		// assume no entity/player update this packet
 		if( cls.state == ca_active )
 		{
-			cl.frames[cls.netchan.incoming_sequence & CL_UPDATE_MASK].valid = false;   
+			cl.frames[cls.netchan.incoming_sequence & CL_UPDATE_MASK].valid = false;
 			cl.frames[cls.netchan.incoming_sequence & CL_UPDATE_MASK].choked = false;
 		}
 		else
@@ -932,7 +928,7 @@ void CL_ParseQuakeMessage( sizebuf_t *msg, qboolean normal_message )
 
 		// end of message (align bits)
 		if( MSG_GetNumBitsLeft( msg ) < 8 )
-			break;		
+			break;
 
 		cmd = MSG_ReadServerCmd( msg );
 

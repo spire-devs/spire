@@ -48,7 +48,7 @@ BRUSH MODELS
 
 #define SURF_PLANEBACK		BIT( 1 )		// plane should be negated
 #define SURF_DRAWSKY		BIT( 2 )		// sky surface
-#define SURF_DRAWTURB_QUADS		BIT( 3 )		// all subidivided polygons are quads 
+#define SURF_DRAWTURB_QUADS		BIT( 3 )		// all subidivided polygons are quads
 #define SURF_DRAWTURB		BIT( 4 )		// warp surface
 #define SURF_DRAWTILED		BIT( 5 )		// face without lighmap
 #define SURF_CONVEYOR		BIT( 6 )		// scrolled texture (was SURF_DRAWBACKGROUND)
@@ -73,7 +73,8 @@ BRUSH MODELS
 #define MAX_MAP_FACES		262144		// can be increased without problems
 #define MAX_MAP_MARKSURFACES		524288		// can be increased without problems
 #else
-#define MAX_MAP_MODELS		768		// embedded models
+// increased to match PrimeXT compilers
+#define MAX_MAP_MODELS		1024		// embedded models
 #define MAX_MAP_ENTSTRING		0x100000		// 1 Mb should be enough
 #define MAX_MAP_PLANES		65536		// can be increased without problems
 #define MAX_MAP_NODES		32767		// because negative shorts are leafs
@@ -134,6 +135,8 @@ BRUSH MODELS
 #define TEX_EXTRA_LIGHTMAP		BIT( 3 )	// bsp31 legacy - using 8 texels per luxel instead of 16 texels per luxel
 #define TEX_SCROLL			BIT( 6 )	// Doom special FX
 
+#define IsLiquidContents( cnt )	( cnt == CONTENTS_WATER || cnt == CONTENTS_SLIME || cnt == CONTENTS_LAVA )
+
 // ambient sound types
 enum
 {
@@ -164,7 +167,7 @@ typedef struct
 {
 	int	id;			// must be little endian XASH
 	int	version;
-	dlump_t	lumps[EXTRA_LUMPS];	
+	dlump_t	lumps[EXTRA_LUMPS];
 } dextrahdr_t;
 
 typedef struct
