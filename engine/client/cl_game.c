@@ -200,7 +200,7 @@ CL_InitCDAudio
 Initialize CD playlist
 ====================
 */
-void CL_InitCDAudio( const char *filename )
+static void CL_InitCDAudio( const char *filename )
 {
 	byte *afile;
 	char *pfile;
@@ -221,8 +221,13 @@ void CL_InitCDAudio( const char *filename )
 	// format: trackname\n [num]
 	while(( pfile = COM_ParseFile( pfile, token, sizeof( token ))) != NULL )
 	{
-		if( !Q_stricmp( token, "blank" )) token[0] = '\0';
-		Q_strncpy( clgame.cdtracks[c], token, sizeof( clgame.cdtracks[0] ));
+		if( !Q_stricmp( token, "blank" ))
+			clgame.cdtracks[c][0] = '\0';
+		else
+		{
+			Q_snprintf( clgame.cdtracks[c], sizeof( clgame.cdtracks[c] ),
+				"media/%s", token );
+		}
 
 		if( ++c > MAX_CDTRACKS - 1 )
 		{
@@ -232,22 +237,6 @@ void CL_InitCDAudio( const char *filename )
 	}
 
 	Mem_Free( afile );
-}
-
-/*
-====================
-CL_PointContents
-
-Return contents for point
-====================
-*/
-int CL_PointContents( const vec3_t p )
-{
-	int cont = PM_PointContents( clgame.pmove, p );
-
-	if( cont <= CONTENTS_CURRENT_0 && cont >= CONTENTS_CURRENT_DOWN )
-		cont = CONTENTS_WATER;
-	return cont;
 }
 
 /*
@@ -322,35 +311,25 @@ print centerscreen message
 */
 void CL_CenterPrint( const char *text, float y )
 {
-	int	length = 0;
-	int	width = 0;
-	char	*s;
+	cl_font_t *font = Con_GetCurFont();
 
-	if( !COM_CheckString( text ))
+	if( !COM_CheckString( text ) || !font || !font->valid )
 		return;
 
-	clgame.centerPrint.lines = 1;
 	clgame.centerPrint.totalWidth = 0;
 	clgame.centerPrint.time = cl.mtime[0]; // allow pause for centerprint
 	Q_strncpy( clgame.centerPrint.message, text, sizeof( clgame.centerPrint.message ));
-	s = clgame.centerPrint.message;
 
-	// count the number of lines for centering
-	while( *s )
-	{
-		if( *s == '\n' )
-		{
-			clgame.centerPrint.lines++;
-			if( width > clgame.centerPrint.totalWidth )
-				clgame.centerPrint.totalWidth = width;
-			width = 0;
-		}
-		else width += clgame.scrInfo.charWidths[*s];
-		s++;
-		length++;
-	}
+	CL_DrawStringLen( font,
+		clgame.centerPrint.message,
+		&clgame.centerPrint.totalWidth,
+		&clgame.centerPrint.totalHeight,
+		FONT_DRAW_HUD | FONT_DRAW_UTF8 );
 
-	clgame.centerPrint.totalHeight = ( clgame.centerPrint.lines * clgame.scrInfo.iCharHeight );
+	if( font->charHeight )
+		clgame.centerPrint.lines = clgame.centerPrint.totalHeight / font->charHeight;
+	else clgame.centerPrint.lines = 1;
+
 	clgame.centerPrint.y = CL_AdjustYPos( y, clgame.centerPrint.totalHeight );
 }
 
@@ -361,102 +340,43 @@ SPR_AdjustSize
 draw hudsprite routine
 ====================
 */
-static void SPR_AdjustSize( float *x, float *y, float *w, float *h )
+void SPR_AdjustSize( float *x, float *y, float *w, float *h )
 {
 	float	xscale, yscale;
+
+	if( refState.width == clgame.scrInfo.iWidth && refState.height == clgame.scrInfo.iHeight )
+		return;
 
 	// scale for screen sizes
 	xscale = refState.width / (float)clgame.scrInfo.iWidth;
 	yscale = refState.height / (float)clgame.scrInfo.iHeight;
 
-	if( x ) *x *= xscale;
-	if( y ) *y *= yscale;
-	if( w ) *w *= xscale;
-	if( h ) *h *= yscale;
+	*x *= xscale;
+	*y *= yscale;
+	*w *= xscale;
+	*h *= yscale;
 }
 
-/*
-====================
-SPR_AdjustSize
-
-draw hudsprite routine
-====================
-*/
-static void SPR_AdjustSizei( int *x, int *y, int *w, int *h )
+void SPR_AdjustTexCoords( float width, float height, float *s1, float *t1, float *s2, float *t2 )
 {
-	float	xscale, yscale;
-
-	// scale for screen sizes
-	xscale = refState.width / (float)clgame.scrInfo.iWidth;
-	yscale = refState.height / (float)clgame.scrInfo.iHeight;
-
-	if( x ) *x *= xscale;
-	if( y ) *y *= yscale;
-	if( w ) *w *= xscale;
-	if( h ) *h *= yscale;
-}
-
-/*
-====================
-PictAdjustSize
-
-draw hudsprite routine
-====================
-*/
-void PicAdjustSize( float *x, float *y, float *w, float *h )
-{
-	if( !clgame.ds.adjust_size ) return;
-
-	SPR_AdjustSize( x, y, w, h );
-}
-
-static qboolean SPR_Scissor( float *x, float *y, float *width, float *height, float *u0, float *v0, float *u1, float *v1 )
-{
-	float	dudx, dvdy;
-
-	// clip sub rect to sprite
-	if(( width == 0 ) || ( height == 0 ))
-		return false;
-
-	if( *x + *width <= clgame.ds.scissor_x )
-		return false;
-	if( *x >= clgame.ds.scissor_x + clgame.ds.scissor_width )
-		return false;
-	if( *y + *height <= clgame.ds.scissor_y )
-		return false;
-	if( *y >= clgame.ds.scissor_y + clgame.ds.scissor_height )
-		return false;
-
-	dudx = (*u1 - *u0) / *width;
-	dvdy = (*v1 - *v0) / *height;
-
-	if( *x < clgame.ds.scissor_x )
+	if( refState.width != clgame.scrInfo.iWidth )
 	{
-		*u0 += (clgame.ds.scissor_x - *x) * dudx;
-		*width -= clgame.ds.scissor_x - *x;
-		*x = clgame.ds.scissor_x;
+		// align to texel if scaling
+		*s1 += 0.5f;
+		*s2 -= 0.5f;
 	}
 
-	if( *x + *width > clgame.ds.scissor_x + clgame.ds.scissor_width )
+	if( refState.height != clgame.scrInfo.iHeight )
 	{
-		*u1 -= (*x + *width - (clgame.ds.scissor_x + clgame.ds.scissor_width)) * dudx;
-		*width = clgame.ds.scissor_x + clgame.ds.scissor_width - *x;
+		// align to texel if scaling
+		*t1 += 0.5f;
+		*t2 -= 0.5f;
 	}
 
-	if( *y < clgame.ds.scissor_y )
-	{
-		*v0 += (clgame.ds.scissor_y - *y) * dvdy;
-		*height -= clgame.ds.scissor_y - *y;
-		*y = clgame.ds.scissor_y;
-	}
-
-	if( *y + *height > clgame.ds.scissor_y + clgame.ds.scissor_height )
-	{
-		*v1 -= (*y + *height - (clgame.ds.scissor_y + clgame.ds.scissor_height)) * dvdy;
-		*height = clgame.ds.scissor_y + clgame.ds.scissor_height - *y;
-	}
-
-	return true;
+	*s1 /= width;
+	*t1 /= height;
+	*s2 /= width;
+	*t2 /= height;
 }
 
 /*
@@ -484,9 +404,7 @@ static void SPR_DrawGeneric( int frame, float x, float y, float width, float hei
 
 	if( prc )
 	{
-		wrect_t	rc;
-
-		rc = *prc;
+		wrect_t	rc = *prc;
 
 		// Sigh! some stupid modmakers set wrong rectangles in hud.txt
 		if( rc.left <= 0 || rc.left >= width ) rc.left = 0;
@@ -494,11 +412,13 @@ static void SPR_DrawGeneric( int frame, float x, float y, float width, float hei
 		if( rc.right <= 0 || rc.right > width ) rc.right = width;
 		if( rc.bottom <= 0 || rc.bottom > height ) rc.bottom = height;
 
+		s1 = rc.left;
+		t1 = rc.top;
+		s2 = rc.right;
+		t2 = rc.bottom;
+
 		// calc user-defined rectangle
-		s1 = (float)rc.left / width;
-		t1 = (float)rc.top / height;
-		s2 = (float)rc.right / width;
-		t2 = (float)rc.bottom / height;
+		SPR_AdjustTexCoords( width, height, &s1, &t1, &s2, &t2 );
 		width = rc.right - rc.left;
 		height = rc.bottom - rc.top;
 	}
@@ -509,7 +429,7 @@ static void SPR_DrawGeneric( int frame, float x, float y, float width, float hei
 	}
 
 	// pass scissor test if supposed
-	if( clgame.ds.scissor_test && !SPR_Scissor( &x, &y, &width, &height, &s1, &t1, &s2, &t2 ))
+	if( !CL_Scissor( &clgame.ds.scissor, &x, &y, &width, &height, &s1, &t1, &s2, &t2 ))
 		return;
 
 	// scale for screen sizes
@@ -528,6 +448,7 @@ called each frame
 */
 void CL_DrawCenterPrint( void )
 {
+	cl_font_t *font = Con_GetCurFont();
 	char	*pText;
 	int	i, j, x, y;
 	int	width, lineLength;
@@ -547,8 +468,10 @@ void CL_DrawCenterPrint( void )
 	y = clgame.centerPrint.y; // start y
 	colorDefault = g_color_table[7];
 	pText = clgame.centerPrint.message;
-	Con_DrawCharacterLen( 0, NULL, &charHeight );
 
+	CL_DrawCharacterLen( font, 0, NULL, &charHeight );
+
+	ref.dllFuncs.GL_SetRenderMode( font->rendermode );
 	for( i = 0; i < clgame.centerPrint.lines; i++ )
 	{
 		lineLength = 0;
@@ -558,7 +481,7 @@ void CL_DrawCenterPrint( void )
 		{
 			byte c = *pText;
 			line[lineLength] = c;
-			Con_DrawCharacterLen( c, &charWidth, NULL );
+			CL_DrawCharacterLen( font, c, &charWidth, NULL );
 			width += charWidth;
 			lineLength++;
 			pText++;
@@ -575,10 +498,45 @@ void CL_DrawCenterPrint( void )
 		for( j = 0; j < lineLength; j++ )
 		{
 			if( x >= 0 && y >= 0 && x <= refState.width )
-				x += Con_DrawCharacter( x, y, line[j], colorDefault );
+				x += CL_DrawCharacter( x, y, line[j], colorDefault, font, FONT_DRAW_UTF8 | FONT_DRAW_HUD | FONT_DRAW_NORENDERMODE );
 		}
 		y += charHeight;
 	}
+}
+
+static int V_FadeAlpha( screenfade_t *sf )
+{
+	int alpha;
+
+	if( cl.time > sf->fadeReset && cl.time > sf->fadeEnd )
+	{
+		if( !FBitSet( sf->fadeFlags, FFADE_STAYOUT ))
+			return 0;
+	}
+
+	if( FBitSet( sf->fadeFlags, FFADE_STAYOUT ))
+	{
+		alpha = sf->fadealpha;
+		if( FBitSet( sf->fadeFlags, FFADE_OUT ) && sf->fadeTotalEnd > cl.time )
+		{
+			alpha += sf->fadeSpeed * ( sf->fadeTotalEnd - cl.time );
+		}
+		else
+		{
+			sf->fadeEnd = cl.time + 0.1;
+		}
+	}
+	else
+	{
+		alpha = sf->fadeSpeed * ( sf->fadeEnd - cl.time );
+		if( FBitSet( sf->fadeFlags, FFADE_OUT ))
+		{
+			alpha += sf->fadealpha;
+		}
+	}
+	alpha = bound( 0, alpha, sf->fadealpha );
+
+	return alpha;
 }
 
 /*
@@ -592,41 +550,29 @@ can be modulated
 void CL_DrawScreenFade( void )
 {
 	screenfade_t	*sf = &clgame.fade;
-	int		iFadeAlpha, testFlags;
+	int		alpha;
 
-	// keep pushing reset time out indefinitely
-	if( sf->fadeFlags & FFADE_STAYOUT )
-		sf->fadeReset = cl.time + 0.1f;
+	alpha = V_FadeAlpha( sf );
 
-	if( sf->fadeReset == 0.0f && sf->fadeEnd == 0.0f )
-		return;	// inactive
-
-	// all done?
-	if(( cl.time > sf->fadeReset ) && ( cl.time > sf->fadeEnd ))
-	{
-		memset( &clgame.fade, 0, sizeof( clgame.fade ));
+	if( !alpha )
 		return;
-	}
 
-	testFlags = (sf->fadeFlags & ~FFADE_MODULATE);
-
-	// fading...
-	if( testFlags == FFADE_STAYOUT )
+	if( FBitSet( sf->fadeFlags, FFADE_MODULATE ))
 	{
-		iFadeAlpha = sf->fadealpha;
+		ref.dllFuncs.GL_SetRenderMode( kRenderScreenFadeModulate );
+
+		ref.dllFuncs.Color4ub(
+			(uint16_t)( sf->fader * alpha + ( 255 - alpha ) * 255 ) >> 8,
+			(uint16_t)( sf->fadeg * alpha + ( 255 - alpha ) * 255 ) >> 8,
+			(uint16_t)( sf->fadeb * alpha + ( 255 - alpha ) * 255 ) >> 8,
+			255 );
 	}
 	else
 	{
-		iFadeAlpha = sf->fadeSpeed * ( sf->fadeEnd - cl.time );
-		if( sf->fadeFlags & FFADE_OUT ) iFadeAlpha += sf->fadealpha;
-		iFadeAlpha = bound( 0, iFadeAlpha, sf->fadealpha );
+		ref.dllFuncs.GL_SetRenderMode( kRenderTransTexture );
+		ref.dllFuncs.Color4ub( sf->fader, sf->fadeg, sf->fadeb, alpha );
 	}
 
-	ref.dllFuncs.Color4ub( sf->fader, sf->fadeg, sf->fadeb, iFadeAlpha );
-
-	if( sf->fadeFlags & FFADE_MODULATE )
-		ref.dllFuncs.GL_SetRenderMode( kRenderTransAdd );
-	else ref.dllFuncs.GL_SetRenderMode( kRenderTransTexture );
 	ref.dllFuncs.R_DrawStretchPic( 0, 0, refState.width, refState.height, 0, 0, 1, 1,
 		R_GetBuiltinTexture( REF_WHITE_TEXTURE ));
 	ref.dllFuncs.Color4ub( 255, 255, 255, 255 );
@@ -649,7 +595,11 @@ static void CL_InitTitles( const char *filename )
 	// initialize text messages (game_text)
 	for( i = 0; i < MAX_TEXTCHANNELS; i++ )
 	{
-		cl_textmessage[i].pName = _copystring( clgame.mempool, va( TEXT_MSGNAME, i ), __FILE__, __LINE__ );
+		char name[MAX_VA_STRING];
+
+		Q_snprintf( name, sizeof( name ), TEXT_MSGNAME, i );
+
+		cl_textmessage[i].pName = _copystring( clgame.mempool, name, __FILE__, __LINE__ );
 		cl_textmessage[i].pMessage = cl_textbuffer[i];
 	}
 
@@ -839,6 +789,92 @@ const char *CL_SoundFromIndex( int index )
 }
 
 /*
+================
+CL_EnableScissor
+
+enable scissor test
+================
+*/
+void CL_EnableScissor( scissor_state_t *scissor, int x, int y, int width, int height )
+{
+	scissor->x = x;
+	scissor->y = y;
+	scissor->width = width;
+	scissor->height = height;
+	scissor->test = true;
+}
+
+/*
+================
+CL_DisableScissor
+
+disable scissor test
+================
+*/
+void CL_DisableScissor( scissor_state_t *scissor )
+{
+	scissor->test = false;
+}
+
+/*
+================
+CL_Scissor
+
+perform common scissor test
+================
+*/
+qboolean CL_Scissor( const scissor_state_t *scissor, float *x, float *y, float *width, float *height, float *u0, float *v0, float *u1, float *v1 )
+{
+	float dudx, dvdy;
+
+	if( !scissor->test )
+		return true;
+
+	// clip sub rect to sprite
+	if( *width == 0 || *height == 0 )
+		return false;
+
+	if( *x + *width <= scissor->x )
+		return false;
+	if( *x >= scissor->x + scissor->width )
+		return false;
+	if( *y + *height <= scissor->y )
+		return false;
+	if( *y >= scissor->y + scissor->height )
+		return false;
+
+	dudx = (*u1 - *u0) / *width;
+	dvdy = (*v1 - *v0) / *height;
+
+	if( *x < scissor->x )
+	{
+		*u0 += (scissor->x - *x) * dudx;
+		*width -= scissor->x - *x;
+		*x = scissor->x;
+	}
+
+	if( *x + *width > scissor->x + scissor->width )
+	{
+		*u1 -= (*x + *width - (scissor->x + scissor->width)) * dudx;
+		*width = scissor->x + scissor->width - *x;
+	}
+
+	if( *y < scissor->y )
+	{
+		*v0 += (scissor->y - *y) * dvdy;
+		*height -= scissor->y - *y;
+		*y = scissor->y;
+	}
+
+	if( *y + *height > scissor->y + scissor->height )
+	{
+		*v1 -= (*y + *height - (scissor->y + scissor->height)) * dvdy;
+		*height = scissor->y + scissor->height - *y;
+	}
+	return true;
+}
+
+/*
 =========
 SPR_EnableScissor
 
@@ -852,11 +888,7 @@ static void GAME_EXPORT SPR_EnableScissor( int x, int y, int width, int height )
 	width = bound( 0, width, clgame.scrInfo.iWidth - x );
 	height = bound( 0, height, clgame.scrInfo.iHeight - y );
 
-	clgame.ds.scissor_x = x;
-	clgame.ds.scissor_width = width;
-	clgame.ds.scissor_y = y;
-	clgame.ds.scissor_height = height;
-	clgame.ds.scissor_test = true;
+	CL_EnableScissor( &clgame.ds.scissor, x, y, width, height );
 }
 
 /*
@@ -867,11 +899,7 @@ SPR_DisableScissor
 */
 static void GAME_EXPORT SPR_DisableScissor( void )
 {
-	clgame.ds.scissor_x = 0;
-	clgame.ds.scissor_width = 0;
-	clgame.ds.scissor_y = 0;
-	clgame.ds.scissor_height = 0;
-	clgame.ds.scissor_test = false;
+	CL_DisableScissor( &clgame.ds.scissor );
 }
 
 /*
@@ -941,28 +969,21 @@ CL_DrawLoading
 draw loading progress bar
 =============
 */
-static void CL_DrawLoadingOrPaused( qboolean paused, float percent )
+static void CL_DrawLoadingOrPaused( int tex )
 {
-	int	x, y, width, height, right;
+	float	x, y, width, height;
+	int iWidth, iHeight;
 
-	R_GetTextureParms( &width, &height, paused ? cls.pauseIcon : cls.loadingBar );
-	x = ( clgame.scrInfo.iWidth - width ) >> 1;
-	y = ( clgame.scrInfo.iHeight - height) >> 1;
+	R_GetTextureParms( &iWidth, &iHeight, tex );
+	x = ( clgame.scrInfo.iWidth - iWidth ) / 2.0f;
+	y = ( clgame.scrInfo.iHeight - iHeight ) / 2.0f;
+	width = iWidth;
+	height = iHeight;
 
-	SPR_AdjustSizei( &x, &y, &width, &height );
-
-	if( !paused )
-	{
-		ref.dllFuncs.Color4ub( 255, 255, 255, 255 );
-		ref.dllFuncs.GL_SetRenderMode( kRenderTransTexture );
-		ref.dllFuncs.R_DrawStretchPic( x, y, width, height, 0, 0, 1, 1, cls.loadingBar );
-	}
-	else
-	{
-		ref.dllFuncs.Color4ub( 255, 255, 255, 255 );
-		ref.dllFuncs.GL_SetRenderMode( kRenderTransTexture );
-		ref.dllFuncs.R_DrawStretchPic( x, y, width, height, 0, 0, 1, 1, cls.pauseIcon );
-	}
+	SPR_AdjustSize( &x, &y, &width, &height );
+	ref.dllFuncs.Color4ub( 255, 255, 255, 255 );
+	ref.dllFuncs.GL_SetRenderMode( kRenderTransTexture );
+	ref.dllFuncs.R_DrawStretchPic( x, y, width, height, 0, 0, 1, 1, tex );
 }
 
 void CL_DrawHUD( int state )
@@ -988,15 +1009,15 @@ void CL_DrawHUD( int state )
 		CL_DrawCrosshair ();
 		CL_DrawCenterPrint ();
 		clgame.dllFuncs.pfnRedraw( cl.time, cl.intermission );
-		CL_DrawLoadingOrPaused( true, 0.0f );
+		CL_DrawLoadingOrPaused( cls.pauseIcon );
 		break;
 	case CL_LOADING:
-		CL_DrawLoadingOrPaused( false, scr_loading->value );
+		CL_DrawLoadingOrPaused( cls.loadingBar );
 		break;
 	case CL_CHANGELEVEL:
 		if( cls.draw_changelevel )
 		{
-			CL_DrawLoadingOrPaused( false, 100.0f );
+			CL_DrawLoadingOrPaused( cls.loadingBar );
 			cls.draw_changelevel = false;
 		}
 		break;
@@ -1048,23 +1069,18 @@ void CL_LinkUserMessage( char *pszName, const int svc_num, int iSize )
 	CL_ClearUserMessage( pszName, svc_num );
 }
 
-void CL_FreeEntity( cl_entity_t *pEdict )
-{
-	Assert( pEdict != NULL );
-	R_RemoveEfrags( pEdict );
-	CL_KillDeadBeams( pEdict );
-}
-
 void CL_ClearWorld( void )
 {
-	cl_entity_t	*worldmodel;
+	if( clgame.entities ) // check if we have entities, legacy protocol support kinda breaks this logic
+	{
+		cl_entity_t *worldmodel = clgame.entities;
 
-	worldmodel = clgame.entities;
-	worldmodel->curstate.modelindex = 1;	// world model
-	worldmodel->curstate.solid = SOLID_BSP;
-	worldmodel->curstate.movetype = MOVETYPE_PUSH;
-	worldmodel->model = cl.worldmodel;
-	worldmodel->index = 0;
+		worldmodel->curstate.modelindex = 1;	// world model
+		worldmodel->curstate.solid = SOLID_BSP;
+		worldmodel->curstate.movetype = MOVETYPE_PUSH;
+		worldmodel->model = cl.worldmodel;
+		worldmodel->index = 0;
+	}
 
 	world.max_recursion = 0;
 
@@ -1162,6 +1178,7 @@ static qboolean CL_LoadHudSprite( const char *szSpriteName, model_t *m_pSprite, 
 	// it's hud sprite, make difference names to prevent free shared textures
 	if( type == SPR_CLIENT || type == SPR_HUDSPRITE )
 		SetBits( m_pSprite->flags, MODEL_CLIENT );
+
 	m_pSprite->numtexinfo = texFlags; // store texFlags into numtexinfo
 
 	if( !FS_FileExists( szSpriteName, false ) )
@@ -1355,7 +1372,7 @@ pfnSPR_Frames
 */
 int EXPORT pfnSPR_Frames( HSPRITE hPic )
 {
-	int	numFrames;
+	int	numFrames = 0;
 
 	ref.dllFuncs.R_GetSpriteParms( NULL, NULL, &numFrames, 0, CL_GetSpritePointer( hPic ));
 
@@ -1370,7 +1387,7 @@ pfnSPR_Height
 */
 static int GAME_EXPORT pfnSPR_Height( HSPRITE hPic, int frame )
 {
-	int	sprHeight;
+	int	sprHeight = 0;
 
 	ref.dllFuncs.R_GetSpriteParms( NULL, &sprHeight, NULL, frame, CL_GetSpritePointer( hPic ));
 
@@ -1385,7 +1402,7 @@ pfnSPR_Width
 */
 static int GAME_EXPORT pfnSPR_Width( HSPRITE hPic, int frame )
 {
-	int	sprWidth;
+	int	sprWidth = 0;
 
 	ref.dllFuncs.R_GetSpriteParms( &sprWidth, NULL, NULL, frame, CL_GetSpritePointer( hPic ));
 
@@ -1400,7 +1417,13 @@ pfnSPR_Set
 */
 static void GAME_EXPORT pfnSPR_Set( HSPRITE hPic, int r, int g, int b )
 {
-	clgame.ds.pSprite = CL_GetSpritePointer( hPic );
+	const model_t *sprite = CL_GetSpritePointer( hPic );
+
+	// a1ba: do not alter the state if invalid HSPRITE was passed
+	if( !sprite )
+		return;
+
+	clgame.ds.pSprite = sprite;
 	clgame.ds.spriteColor[0] = bound( 0, r, 255 );
 	clgame.ds.spriteColor[1] = bound( 0, g, 255 );
 	clgame.ds.spriteColor[2] = bound( 0, b, 255 );
@@ -1609,6 +1632,14 @@ int GAME_EXPORT CL_GetScreenInfo( SCREENINFO *pscrinfo )
 {
 	float scale_factor = hud_scale->value;
 
+	if( FBitSet( hud_fontscale->flags, FCVAR_CHANGED ))
+	{
+		CL_FreeFont( &cls.creditsFont );
+		SCR_LoadCreditsFont();
+
+		ClearBits( hud_fontscale->flags, FCVAR_CHANGED );
+	}
+
 	// setup screen info
 	clgame.scrInfo.iSize = sizeof( clgame.scrInfo );
 	clgame.scrInfo.iFlags = SCRINFO_SCREENFLASH;
@@ -1696,14 +1727,12 @@ pfnServerCmd
 */
 static int GAME_EXPORT pfnServerCmd( const char *szCmdString )
 {
-	string	buf;
-
 	if( !COM_CheckString( szCmdString ))
 		return 0;
 
 	// just like the client typed "cmd xxxxx" at the console
-	Q_snprintf( buf, sizeof( buf ) - 1, "cmd %s\n", szCmdString );
-	Cbuf_AddText( buf );
+	MSG_BeginClientCmd( &cls.netchan.message, clc_stringcmd );
+	MSG_WriteString( &cls.netchan.message, szCmdString );
 
 	return 1;
 }
@@ -1727,7 +1756,8 @@ static int GAME_EXPORT pfnClientCmd( const char *szCmdString )
 	else
 	{
 		// will exec later
-		Q_strncat( host.deferred_cmd, va( "%s\n", szCmdString ), sizeof( host.deferred_cmd ));
+		Q_strncat( host.deferred_cmd, szCmdString, sizeof( host.deferred_cmd ));
+		Q_strncat( host.deferred_cmd, "\n", sizeof( host.deferred_cmd ));
 	}
 
 	return 1;
@@ -1830,7 +1860,11 @@ client_textmessage_t *CL_TextMessageGet( const char *pName )
 	// first check internal messages
 	for( i = 0; i < MAX_TEXTCHANNELS; i++ )
 	{
-		if( !Q_strcmp( pName, va( TEXT_MSGNAME, i )))
+		char name[MAX_VA_STRING];
+
+		Q_snprintf( name, sizeof( name ), TEXT_MSGNAME, i );
+
+		if( !Q_strcmp( pName, name ))
 			return cl_textmessage + i;
 	}
 
@@ -1852,24 +1886,13 @@ returns drawed chachter width (in real screen pixels)
 */
 static int GAME_EXPORT pfnDrawCharacter( int x, int y, int number, int r, int g, int b )
 {
-	if( !cls.creditsFont.valid )
-		return 0;
+	rgba_t color = { r, g, b, 255 };
+	int flags = FONT_DRAW_HUD;
 
 	if( hud_utf8->value )
-		number = Con_UtfProcessChar( number );
+		flags |= FONT_DRAW_UTF8;
 
-	number &= 255;
-
-	if( number < 32 ) return 0;
-	if( y < -clgame.scrInfo.iCharHeight )
-		return 0;
-
-	clgame.ds.adjust_size = true;
-	pfnPIC_Set( cls.creditsFont.hFontTexture, r, g, b, 255 );
-	pfnPIC_DrawAdditive( x, y, -1, -1, &cls.creditsFont.fontRc[number] );
-	clgame.ds.adjust_size = false;
-
-	return clgame.scrInfo.charWidths[number];
+	return CL_DrawCharacter( x, y, number, color, &cls.creditsFont, flags );
 }
 
 /*
@@ -1881,20 +1904,12 @@ drawing string like a console string
 */
 int GAME_EXPORT pfnDrawConsoleString( int x, int y, char *string )
 {
-	int	drawLen;
+	cl_font_t *font = Con_GetFont( con_fontsize->value );
+	rgba_t color;
+	Vector4Copy( clgame.ds.textColor, color );
+	Vector4Set( clgame.ds.textColor, 255, 255, 255, 255 );
 
-	if( !COM_CheckString( string ))
-		return 0; // silent ignore
-	Con_SetFont( con_fontsize->value );
-
-	clgame.ds.adjust_size = true;
-	drawLen = Con_DrawString( x, y, string, clgame.ds.textColor );
-	MakeRGBA( clgame.ds.textColor, 255, 255, 255, 255 );
-	clgame.ds.adjust_size = false;
-
-	Con_RestoreFont();
-
-	return (x + drawLen); // exclude color prexfixes
+	return x + CL_DrawString( x, y, string, color, font, FONT_DRAW_UTF8 | FONT_DRAW_HUD );
 }
 
 /*
@@ -1922,9 +1937,10 @@ compute string length in screen pixels
 */
 void GAME_EXPORT pfnDrawConsoleStringLen( const char *pText, int *length, int *height )
 {
-	Con_SetFont( con_fontsize->value );
-	Con_DrawStringLen( pText, length, height );
-	Con_RestoreFont();
+	cl_font_t *font = Con_GetFont( con_fontsize->value );
+
+	if( height ) *height = font->charHeight;
+	CL_DrawStringLen( font, pText, length, NULL, FONT_DRAW_UTF8 | FONT_DRAW_HUD );
 }
 
 /*
@@ -2108,58 +2124,52 @@ pfnCalcShake
 */
 void GAME_EXPORT pfnCalcShake( void )
 {
-	int	i;
-	float	fraction, freq;
-	float	localAmp;
+	screen_shake_t *const shake = &clgame.shake;
+	float frametime, fraction, freq;
+	int i;
 
-	if( clgame.shake.time == 0 )
-		return;
-
-	if(( cl.time > clgame.shake.time ) || clgame.shake.amplitude <= 0 || clgame.shake.frequency <= 0 )
+	if( cl.time > shake->time || shake->amplitude <= 0 || shake->frequency <= 0 || shake->duration <= 0 )
 	{
-		memset( &clgame.shake, 0, sizeof( clgame.shake ));
+		// reset shake
+		if( shake->time != 0 )
+		{
+			shake->time = 0;
+			shake->applied_angle = 0;
+			VectorClear( shake->applied_offset );
+		}
+
 		return;
 	}
 
-	if( cl.time > clgame.shake.next_shake )
-	{
-		// higher frequency means we recalc the extents more often and perturb the display again
-		clgame.shake.next_shake = cl.time + ( 1.0f / clgame.shake.frequency );
+	frametime = cl_clientframetime();
 
-		// compute random shake extents (the shake will settle down from this)
+	if( cl.time > shake->next_shake )
+	{
+		// get next shake time based on frequency over duration
+		shake->next_shake = (float)cl.time + shake->frequency / shake->duration;
+
+		// randomize each shake
 		for( i = 0; i < 3; i++ )
-			clgame.shake.offset[i] = COM_RandomFloat( -clgame.shake.amplitude, clgame.shake.amplitude );
-		clgame.shake.angle = COM_RandomFloat( -clgame.shake.amplitude * 0.25f, clgame.shake.amplitude * 0.25f );
+			shake->offset[i] = COM_RandomFloat( -shake->amplitude, shake->amplitude );
+		shake->angle = COM_RandomFloat( -shake->amplitude * 0.25f, shake->amplitude * 0.25f );
 	}
 
-	// ramp down amplitude over duration (fraction goes from 1 to 0 linearly with slope 1/duration)
-	fraction = ( clgame.shake.time - cl.time ) / clgame.shake.duration;
+	// get initial fraction and frequency values over the duration
+	fraction = ((float)cl.time - shake->time ) / shake->duration;
+	freq = fraction != 0.0f ? ( shake->frequency / fraction ) * shake->frequency : 0.0f;
 
-	// ramp up frequency over duration
-	if( fraction )
-	{
-		freq = ( clgame.shake.frequency / fraction );
-	}
-	else
-	{
-		freq = 0;
-	}
+	// quickly approach zero but apply time over sine wave
+	fraction *= fraction * sin( cl.time * freq );
 
-	// square fraction to approach zero more quickly
-	fraction *= fraction;
+	// apply shake offset
+	for( i = 0; i < 3; i++ )
+		shake->applied_offset[i] = shake->offset[i] * fraction;
 
-	// Sine wave that slowly settles to zero
-	fraction = fraction * sin( cl.time * freq );
+	// apply roll angle
+	shake->applied_angle = shake->angle * fraction;
 
-	// add to view origin
-	VectorScale( clgame.shake.offset, fraction, clgame.shake.applied_offset );
-
-	// add to roll
-	clgame.shake.applied_angle = clgame.shake.angle * fraction;
-
-	// drop amplitude a bit, less for higher frequency shakes
-	localAmp = clgame.shake.amplitude * ( host.frametime / ( clgame.shake.duration * clgame.shake.frequency ));
-	clgame.shake.amplitude -= localAmp;
+	// decrease amplitude, but slower on longer shakes or higher frequency
+	shake->amplitude -= shake->amplitude * ( frametime / ( shake->frequency * shake->duration ));
 }
 
 /*
@@ -2170,8 +2180,11 @@ pfnApplyShake
 */
 void GAME_EXPORT pfnApplyShake( float *origin, float *angles, float factor )
 {
-	if( origin ) VectorMA( origin, factor, clgame.shake.applied_offset, origin );
-	if( angles ) angles[ROLL] += clgame.shake.applied_angle * factor;
+	if( origin )
+		VectorMA( origin, factor, clgame.shake.applied_offset, origin );
+
+	if( angles )
+		angles[ROLL] += clgame.shake.applied_angle * factor;
 }
 
 /*
@@ -2191,45 +2204,14 @@ pfnPointContents
 
 =============
 */
-static int GAME_EXPORT pfnPointContents( const float *p, int *truecontents )
+int GAME_EXPORT PM_CL_PointContents( const float *p, int *truecontents )
 {
-	int	cont, truecont;
-
-	truecont = cont = PM_PointContents( clgame.pmove, p );
-	if( truecontents ) *truecontents = truecont;
-
-	if( cont <= CONTENTS_CURRENT_0 && cont >= CONTENTS_CURRENT_DOWN )
-		cont = CONTENTS_WATER;
-	return cont;
+	return PM_PointContentsPmove( clgame.pmove, p, truecontents );
 }
 
-/*
-=============
-pfnTraceLine
-
-=============
-*/
-static pmtrace_t *pfnTraceLine( float *start, float *end, int flags, int usehull, int ignore_pe )
+pmtrace_t *PM_CL_TraceLine( float *start, float *end, int flags, int usehull, int ignore_pe )
 {
-	static pmtrace_t	tr;
-	int		old_usehull;
-
-	old_usehull = clgame.pmove->usehull;
-	clgame.pmove->usehull = usehull;
-
-	switch( flags )
-	{
-	case PM_TRACELINE_PHYSENTSONLY:
-		tr = PM_PlayerTraceExt( clgame.pmove, start, end, 0, clgame.pmove->numphysent, clgame.pmove->physents, ignore_pe, NULL );
-		break;
-	case PM_TRACELINE_ANYVISIBLE:
-		tr = PM_PlayerTraceExt( clgame.pmove, start, end, 0, clgame.pmove->numvisent, clgame.pmove->visents, ignore_pe, NULL );
-		break;
-	}
-
-	clgame.pmove->usehull = old_usehull;
-
-	return &tr;
+	return PM_TraceLine( clgame.pmove, start, end, flags, usehull, ignore_pe );
 }
 
 static void GAME_EXPORT pfnPlaySoundByNameAtLocation( char *szSound, float volume, float *origin )
@@ -2476,7 +2458,6 @@ pfnSetTraceHull
 void GAME_EXPORT CL_SetTraceHull( int hull )
 {
 	clgame.pmove->usehull = bound( 0, hull, 3 );
-
 }
 
 /*
@@ -2505,19 +2486,13 @@ void GAME_EXPORT CL_PlayerTraceExt( float *start, float *end, int traceFlags, in
 
 /*
 =============
-pfnTraceTexture
+CL_TraceTexture
 
 =============
 */
-static const char *pfnTraceTexture( int ground, float *vstart, float *vend )
+const char * GAME_EXPORT PM_CL_TraceTexture( int ground, float *vstart, float *vend )
 {
-	physent_t *pe;
-
-	if( ground < 0 || ground >= clgame.pmove->numphysent )
-		return NULL; // bad ground
-
-	pe = &clgame.pmove->physents[ground];
-	return PM_TraceTexture( pe, vstart, vend );
+	return PM_TraceTexture( clgame.pmove, ground, vstart, vend );
 }
 
 /*
@@ -2528,13 +2503,7 @@ pfnTraceSurface
 */
 struct msurface_s *pfnTraceSurface( int ground, float *vstart, float *vend )
 {
-	physent_t *pe;
-
-	if( ground < 0 || ground >= clgame.pmove->numphysent )
-		return NULL; // bad ground
-
-	pe = &clgame.pmove->physents[ground];
-	return PM_TraceSurface( pe, vstart, vend );
+	return PM_TraceSurfacePmove( clgame.pmove, ground, vstart, vend );
 }
 
 /*
@@ -2600,7 +2569,7 @@ const char *pfnGetGameDirectory( void )
 {
 	static char	szGetGameDir[MAX_SYSPATH];
 
-	Q_strcpy( szGetGameDir, GI->gamefolder );
+	Q_strncpy( szGetGameDir, GI->gamefolder, sizeof( szGetGameDir ));
 	return szGetGameDir;
 }
 
@@ -2625,7 +2594,10 @@ static const char *pfnGetLevelName( void )
 {
 	static char	mapname[64];
 
-	if( cls.state >= ca_connected )
+	// a1ba: don't return maps/.bsp if no map is loaded yet
+	// in GoldSrc this is handled by cl.levelname field but we don't have it
+	// so emulate this behavior here
+	if( cls.state >= ca_connected && COM_CheckStringEmpty( clgame.mapname ))
 		Q_snprintf( mapname, sizeof( mapname ), "maps/%s.bsp", clgame.mapname );
 	else mapname[0] = '\0'; // not in game
 
@@ -2891,23 +2863,7 @@ pfnVGUI2DrawCharacter
 */
 static int GAME_EXPORT pfnVGUI2DrawCharacter( int x, int y, int number, unsigned int font )
 {
-	if( !cls.creditsFont.valid )
-		return 0;
-
-	number &= 255;
-
-	number = Con_UtfProcessChar( number );
-
-	if( number < 32 ) return 0;
-	if( y < -clgame.scrInfo.iCharHeight )
-		return 0;
-
-	clgame.ds.adjust_size = true;
-	gameui.ds.gl_texturenum = cls.creditsFont.hFontTexture;
-	pfnPIC_DrawAdditive( x, y, -1, -1, &cls.creditsFont.fontRc[number] );
-	clgame.ds.adjust_size = false;
-
-	return clgame.scrInfo.charWidths[number];
+	return pfnDrawCharacter( x, y, number, 255, 255, 255 );
 }
 
 /*
@@ -2918,9 +2874,6 @@ pfnVGUI2DrawCharacterAdditive
 */
 static int GAME_EXPORT pfnVGUI2DrawCharacterAdditive( int x, int y, int ch, int r, int g, int b, unsigned int font )
 {
-	if( !hud_utf8->value )
-		ch = Con_UtfProcessChar( ch );
-
 	return pfnDrawCharacter( x, y, ch, r, g, b );
 }
 
@@ -2932,16 +2885,13 @@ pfnDrawString
 */
 static int GAME_EXPORT pfnDrawString( int x, int y, const char *str, int r, int g, int b )
 {
-	int iWidth = 0;
-	Con_UtfProcessChar(0);
+	rgba_t color = { r, g, b, 255 };
+	int flags = FONT_DRAW_HUD | FONT_DRAW_NOLF;
 
-	// draw the string until we hit the null character or a newline character
-	for ( ; *str != 0 && *str != '\n'; str++ )
-	{
-		iWidth += pfnVGUI2DrawCharacterAdditive( x + iWidth, y, (unsigned char)*str, r, g, b, 0 );
-	}
+	if( hud_utf8->value )
+		SetBits( flags, FONT_DRAW_UTF8 );
 
-	return iWidth;
+	return CL_DrawString( x, y, str, color, &cls.creditsFont, flags );
 }
 
 /*
@@ -2952,11 +2902,18 @@ pfnDrawStringReverse
 */
 static int GAME_EXPORT pfnDrawStringReverse( int x, int y, const char *str, int r, int g, int b )
 {
-	// find the end of the string
-	char *szIt;
-	for( szIt = (char*)str; *szIt != 0; szIt++ )
-		x -= clgame.scrInfo.charWidths[ (unsigned char) *szIt ];
-	return pfnDrawString( x, y, str, r, g, b );
+	rgba_t color = { r, g, b, 255 };
+	int flags = FONT_DRAW_HUD | FONT_DRAW_NOLF;
+	int width;
+
+	if( hud_utf8->value )
+		SetBits( flags, FONT_DRAW_UTF8 );
+
+	CL_DrawStringLen( &cls.creditsFont, str, &width, NULL, flags );
+
+	x -= width;
+
+	return CL_DrawString( x, y, str, color, &cls.creditsFont, flags );
 }
 
 /*
@@ -3360,7 +3317,7 @@ void GAME_EXPORT NetAPI_SendRequest( int context, int request, int flags, double
 		return;
 	}
 
-	if( remote_address->type >= NA_IPX )
+	if( remote_address->type != NA_IPX && remote_address->type != NA_BROADCAST_IPX )
 		return; // IPX no longer support
 
 	// find a free request
@@ -3401,15 +3358,17 @@ void GAME_EXPORT NetAPI_SendRequest( int context, int request, int flags, double
 
 	if( request == NETAPI_REQUEST_SERVERLIST )
 	{
-		char	fullquery[512] = "1\xFF" "0.0.0.0:0\0" "\\gamedir\\";
+		char fullquery[512];
+		size_t len;
 
-		// make sure what port is specified
+		len = CL_BuildMasterServerScanRequest( fullquery, sizeof( fullquery ), false );
+
+		// make sure that port is specified
 		if( !nr->resp.remote_address.port )
 			nr->resp.remote_address.port = MSG_BigShort( PORT_MASTER );
 
 		// grab the list from the master server
-		Q_strcpy( &fullquery[22], GI->gamefolder );
-		NET_SendPacket( NS_CLIENT, Q_strlen( GI->gamefolder ) + 23, fullquery, nr->resp.remote_address );
+		NET_SendPacket( NS_CLIENT, len, fullquery, nr->resp.remote_address );
 		clgame.request_type = NET_REQUEST_CLIENT;
 		clgame.master_request = nr; // holds the master request unitl the master acking
 	}
@@ -3431,7 +3390,7 @@ void GAME_EXPORT NetAPI_CancelRequest( int context )
 {
 	net_request_t	*nr;
 	int		i;
-
+;
 	// find a specified request
 	for( i = 0; i < MAX_REQUESTS; i++ )
 	{
@@ -3709,7 +3668,7 @@ static event_api_t gEventApi =
 	CL_WeaponAnim,
 	pfnPrecacheEvent,
 	CL_PlaybackEvent,
-	pfnTraceTexture,
+	PM_CL_TraceTexture,
 	pfnStopAllSounds,
 	pfnKillEvents,
 	CL_PlayerTraceExt,		// Xash3D added
@@ -3814,9 +3773,9 @@ static cl_enginefunc_t gEngfuncs =
 	pfnGetClientTime,
 	pfnCalcShake,
 	pfnApplyShake,
-	pfnPointContents,
+	PM_CL_PointContents,
 	CL_WaterEntity,
-	pfnTraceLine,
+	PM_CL_TraceLine,
 	CL_LoadModel,
 	CL_AddEntity,
 	CL_GetSpritePointer,

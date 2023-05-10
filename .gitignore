@@ -333,6 +333,3 @@ __pycache__
 .history/*
 .cache/*
 enc_temp_folder/
-
-# Half-Life Assets
-valve/

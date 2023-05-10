@@ -21,7 +21,34 @@ GNU General Public License for more details.
 convar_t	*cvar_vars = NULL; // head of list
 convar_t	*cmd_scripting;
 
-CVAR_DEFINE_AUTO( cl_filterstuffcmd, "0", FCVAR_ARCHIVE | FCVAR_PRIVILEGED, "filter commands coming from server" );
+#ifdef HACKS_RELATED_HLMODS
+typedef struct cvar_filter_quirks_s
+{
+	const char *gamedir; // gamedir to enable for
+	const char *cvars; // list of cvars should be excluded from filter
+} cvar_filter_quirks_t;
+
+static cvar_filter_quirks_t cvar_filter_quirks[] =
+{
+	// EXAMPLE:
+	//{
+	//	"valve",
+	//	"test;test1;test100"
+	//},
+	{
+		"ricochet",
+		"r_drawviewmodel",
+	},
+	{
+		"dod",
+		"cl_dodmusic" // Day of Defeat Beta 1.3 cvar
+	},
+};
+
+static cvar_filter_quirks_t *cvar_active_filter_quirks = NULL;
+#endif
+
+CVAR_DEFINE_AUTO( cl_filterstuffcmd, "1", FCVAR_ARCHIVE | FCVAR_PRIVILEGED, "filter commands coming from server" );
 
 /*
 ============
@@ -72,9 +99,15 @@ Cvar_BuildAutoDescription
 build cvar auto description that based on the setup flags
 ============
 */
-const char *Cvar_BuildAutoDescription( int flags )
+const char *Cvar_BuildAutoDescription( const char *szName, int flags )
 {
 	static char	desc[256];
+
+	if( FBitSet( flags, FCVAR_GLCONFIG ))
+	{
+		Q_snprintf( desc, sizeof( desc ), CVAR_GLCONFIG_DESCRIPTION, szName );
+		return desc;
+	}
 
 	desc[0] = '\0';
 
@@ -386,7 +419,7 @@ convar_t *Cvar_Get( const char *name, const char *value, int flags, const char *
 			// which executed from the config file. So we don't need to
 			// change value here: we *already* have actual value from config.
 			// in other cases we need to rewrite them
-			if( Q_strcmp( var->desc, "" ))
+			if( COM_CheckStringEmpty( var->desc ))
 			{
 				// directly set value
 				freestring( var->string );
@@ -444,6 +477,23 @@ convar_t *Cvar_Get( const char *name, const char *value, int flags, const char *
 #endif
 
 	return var;
+}
+
+/*
+============
+Cvar_Getf
+============
+*/
+convar_t *Cvar_Getf( const char *var_name, int flags, const char *description, const char *format, ... )
+{
+	char value[MAX_VA_STRING];
+	va_list args;
+
+	va_start( args, format );
+	Q_vsnprintf( value, sizeof( value ), format, args );
+	va_end( args );
+
+	return Cvar_Get( var_name, value, flags, description );
 }
 
 /*
@@ -902,6 +952,39 @@ static qboolean Cvar_ShouldSetCvar( convar_t *v, qboolean isPrivileged )
 	if( cl_filterstuffcmd.value <= 0.0f )
 		return true;
 
+#ifdef HACKS_RELATED_HLMODS
+	// check if game-specific filter exceptions should be applied
+	// TODO: for cmd exceptions, make generic function
+	if( cvar_active_filter_quirks )
+	{
+		const char *cur, *next;
+
+		cur = cvar_active_filter_quirks->cvars;
+		next = Q_strchr( cur, ';' );
+
+		// TODO: implement Q_strchrnul
+		while( cur && *cur )
+		{
+			size_t len = next ? next - cur : Q_strlen( cur );
+
+			// found, quit
+			if( !Q_strnicmp( cur, v->name, len ))
+				return true;
+
+			if( next )
+			{
+				cur = next + 1;
+				next = Q_strchr( cur, ';' );
+			}
+			else
+			{
+				// stop
+				cur = NULL;
+			}
+		}
+	}
+#endif
+
 	if( FBitSet( v->flags, FCVAR_FILTERABLE ))
 		return false;
 
@@ -965,8 +1048,6 @@ qboolean Cvar_CommandWithPrivilegeCheck( convar_t *v, qboolean isPrivileged )
 	else
 	{
 		Cvar_DirectSet( v, Cmd_Argv( 1 ));
-		if( host.apply_game_config )
-			host.sv_cvars_restored++;
 		return true;
 	}
 }
@@ -1009,7 +1090,7 @@ void Cvar_Toggle_f( void )
 
 	v = !Cvar_VariableInteger( Cmd_Argv( 1 ));
 
-	Cvar_Set( Cmd_Argv( 1 ), va( "%i", v ));
+	Cvar_Set( Cmd_Argv( 1 ), v ? "1" : "0" );
 }
 
 /*
@@ -1038,8 +1119,8 @@ void Cvar_Set_f( void )
 		len = Q_strlen( Cmd_Argv(i) + 1 );
 		if( l + len >= MAX_CMD_TOKENS - 2 )
 			break;
-		Q_strcat( combined, Cmd_Argv( i ));
-		if( i != c-1 ) Q_strcat( combined, " " );
+		Q_strncat( combined, Cmd_Argv( i ), sizeof( combined ));
+		if( i != c-1 ) Q_strncat( combined, " ", sizeof( combined ));
 		l += len;
 	}
 
@@ -1091,7 +1172,6 @@ void Cvar_List_f( void )
 {
 	convar_t	*var;
 	const char	*match = NULL;
-	char	*value;
 	int	count = 0;
 	size_t	matchlen = 0;
 
@@ -1103,6 +1183,8 @@ void Cvar_List_f( void )
 
 	for( var = cvar_vars; var; var = var->next )
 	{
+		char value[MAX_VA_STRING];
+
 		if( var->name[0] == '@' )
 			continue;	// never shows system cvars
 
@@ -1110,12 +1192,12 @@ void Cvar_List_f( void )
 			continue;
 
 		if( Q_colorstr( var->string ))
-			value = va( "\"%s\"", var->string );
-		else value = va( "\"^2%s^7\"", var->string );
+			Q_snprintf( value, sizeof( value ), "\"%s\"", var->string );
+		else Q_snprintf( value, sizeof( value ), "\"^2%s^7\"", var->string );
 
 		if( FBitSet( var->flags, FCVAR_EXTENDED|FCVAR_ALLOCATED ))
 			Con_Printf( " %-*s %s ^3%s^7\n", 32, var->name, value, var->desc );
-		else Con_Printf( " %-*s %s ^3%s^7\n", 32, var->name, value, Cvar_BuildAutoDescription( var->flags ));
+		else Con_Printf( " %-*s %s ^3%s^7\n", 32, var->name, value, Cvar_BuildAutoDescription( var->name, var->flags ));
 
 		count++;
 	}
@@ -1157,6 +1239,7 @@ Reads in all archived cvars
 void Cvar_Init( void )
 {
 	cvar_vars = NULL;
+	cvar_active_filter_quirks = NULL;
 	cmd_scripting = Cvar_Get( "cmd_scripting", "0", FCVAR_ARCHIVE|FCVAR_PRIVILEGED, "enable simple condition checking and variable operations" );
 	Cvar_RegisterVariable( &host_developer ); // early registering for dev
 	Cvar_RegisterVariable( &cl_filterstuffcmd );
@@ -1165,6 +1248,26 @@ void Cvar_Init( void )
 	Cmd_AddRestrictedCommand( "reset", Cvar_Reset_f, "reset any type variable to initial value" );
 	Cmd_AddCommand( "set", Cvar_Set_f, "create or change the value of a console variable" );
 	Cmd_AddCommand( "cvarlist", Cvar_List_f, "display all console variables beginning with the specified prefix" );
+}
+
+/*
+============
+Cvar_PostFSInit
+
+============
+*/
+void Cvar_PostFSInit( void )
+{
+	int i;
+
+	for( i = 0; i < ARRAYSIZE( cvar_filter_quirks ); i++ )
+	{
+		if( !Q_stricmp( cvar_filter_quirks[i].gamedir, GI->gamefolder ))
+		{
+			cvar_active_filter_quirks = &cvar_filter_quirks[i];
+			break;
+		}
+	}
 }
 
 #if XASH_ENGINE_TESTS

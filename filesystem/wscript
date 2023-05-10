@@ -16,9 +16,34 @@ def configure(conf):
 
 def build(bld):
 	bld(name = 'filesystem_includes', export_includes = '.')
+
+	libs = [ 'filesystem_includes' ]
+	# on PSVita do not link any libraries that are already in the main executable, but add the includes target
+	if bld.env.DEST_OS == 'psvita':
+		libs += [ 'sdk_includes' ]
+	else:
+		libs += [ 'public' ]
+
 	bld.shlib(target = 'filesystem_stdio',
-		features = 'cxx',
+		features = 'cxx seq',
 		source = bld.path.ant_glob(['*.c', '*.cpp']),
-		use = 'filesystem_includes public',
+		use = libs,
 		install_path = bld.env.LIBDIR,
 		subsystem = bld.env.MSVC_SUBSYSTEM)
+
+	if bld.env.TESTS:
+		# build in same module, so dynamic linking will work
+		# for now (until we turn libpublic to shared module lol)
+		tests = {
+			'interface' : 'tests/interface.cpp',
+			'caseinsensitive' : 'tests/caseinsensitive.c',
+		}
+
+		for i in tests:
+			bld.program(features = 'test seq',
+				source = tests[i],
+				target = 'test_%s' % i,
+				use = libs + ['DL'],
+				rpath = '$ORIGIN',
+				subsystem = bld.env.CONSOLE_SUBSYSTEM,
+				install_path = None)

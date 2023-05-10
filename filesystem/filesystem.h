@@ -1,6 +1,9 @@
 /*
 filesystem.h - engine FS
+Copyright (C) 2003-2006 Mathieu Olivier
+Copyright (C) 2000-2007 DarkPlaces contributors
 Copyright (C) 2007 Uncle Mike
+Copyright (C) 2015-2023 Xash3D FWGS contributors
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -28,8 +31,8 @@ extern "C"
 {
 #endif // __cplusplus
 
-#define FS_API_VERSION 1 // not stable yet!
-#define FS_API_CREATEINTERFACE_TAG "XashFileSystem001" // follow FS_API_VERSION!!!
+#define FS_API_VERSION 2 // not stable yet!
+#define FS_API_CREATEINTERFACE_TAG "XashFileSystem002" // follow FS_API_VERSION!!!
 
 // search path flags
 enum
@@ -126,7 +129,7 @@ typedef void (*fs_event_callback_t)( const char *path );
 
 typedef struct fs_api_t
 {
-	qboolean (*InitStdio)( qboolean caseinsensitive, const char *rootdir, const char *basedir, const char *gamedir, const char *rodir );
+	qboolean (*InitStdio)( qboolean unused_set_to_true, const char *rootdir, const char *basedir, const char *gamedir, const char *rodir );
 	void (*ShutdownStdio)( void );
 
 	// search path utils
@@ -152,8 +155,8 @@ typedef struct fs_api_t
 	qboolean (*Eof)( file_t *file );
 	int (*Flush)( file_t *file );
 	int (*Close)( file_t *file );
-	int (*Gets)( file_t *file, byte *string, size_t bufsize );
-	int (*UnGetc)( file_t *file, byte c );
+	int (*Gets)( file_t *file, char *string, size_t bufsize );
+	int (*UnGetc)( file_t *file, char c );
 	int (*Getc)( file_t *file );
 	int (*VPrintf)( file_t *file, const char *format, va_list ap );
 	int (*Printf)( file_t *file, const char *format, ... ) _format( 2 );
@@ -176,12 +179,14 @@ typedef struct fs_api_t
 	fs_offset_t (*FileSize)( const char *filename, qboolean gamedironly );
 	qboolean (*Rename)( const char *oldname, const char *newname );
 	qboolean (*Delete)( const char *path );
-	qboolean (*SysFileExists)( const char *path, qboolean casesensitive );
+	qboolean (*SysFileExists)( const char *path );
 	const char *(*GetDiskPath)( const char *name, qboolean gamedironly );
 
-	// file watcher
-	void (*WatchFrame)( void ); // engine will read all events and call appropriate callbacks
-	qboolean (*AddWatch)( const char *path, fs_event_callback_t callback );
+	// reserved
+	void (*Unused0)( void );
+	void (*Unused1)( void );
+
+	qboolean (*GetFullDiskPath)( char *buffer, size_t size, const char *name, qboolean gamedironly );
 } fs_api_t;
 
 typedef struct fs_interface_t

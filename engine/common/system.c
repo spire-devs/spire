@@ -26,7 +26,6 @@ GNU General Public License for more details.
 #if XASH_POSIX
 #include <unistd.h>
 #include <signal.h>
-#include <dlfcn.h>
 
 #if !XASH_ANDROID
 #include <pwd.h>
@@ -35,6 +34,14 @@ GNU General Public License for more details.
 
 #if XASH_WIN32
 #include <process.h>
+#endif
+
+#if XASH_NSWITCH
+#include <switch.h>
+#endif
+
+#if XASH_PSVITA
+#include <vitasdk.h>
 #endif
 
 #include "menu_int.h" // _UPDATE_PAGE macro
@@ -62,7 +69,7 @@ Sys_DebugBreak
 void Sys_DebugBreak( void )
 {
 #if XASH_LINUX || ( XASH_WIN32 && !XASH_64BIT )
-#if XASH_MSVC
+#if _MSC_VER
 	if( Sys_DebuggerPresent() )
 		_asm { int 3 }
 #elif XASH_X86
@@ -126,7 +133,12 @@ const char *Sys_GetCurrentUser( void )
 
 	if( GetUserName( s_userName, &size ))
 		return s_userName;
-#elif XASH_POSIX && !XASH_ANDROID
+#elif XASH_PSVITA
+	static string username;
+	sceAppUtilSystemParamGetString( SCE_SYSTEM_PARAM_ID_USERNAME, username, sizeof( username ) - 1 );
+	if( COM_CheckStringEmpty( username ))
+		return username;
+#elif XASH_POSIX && !XASH_ANDROID && !XASH_NSWITCH
 	uid_t uid = geteuid();
 	struct passwd *pw = getpwuid( uid );
 
@@ -435,6 +447,7 @@ void Sys_Error( const char *error, ... )
 		Wcon_ShowConsole( false );
 #endif
 		MSGBOX( text );
+		Sys_Print( text );
 	}
 	else
 	{
@@ -445,7 +458,7 @@ void Sys_Error( const char *error, ... )
 		Sys_Print( text );	// print error message
 		Sys_WaitForQuit();
 	}
-	
+
 	Sys_Quit();
 }
 
@@ -565,6 +578,19 @@ it explicitly doesn't use internal allocation or string copy utils
 */
 qboolean Sys_NewInstance( const char *gamedir )
 {
+#if XASH_NSWITCH
+	char newargs[4096];
+	const char *exe = host.argv[0]; // arg 0 is always the full NRO path
+
+	// TODO: carry over the old args (assuming you can even pass any)
+	Q_snprintf( newargs, sizeof( newargs ), "%s -game %s", exe, gamedir );
+	// just restart the entire thing
+	printf( "envSetNextLoad exe: `%s`\n", exe );
+	printf( "envSetNextLoad argv:\n`%s`\n", newargs );
+	Host_Shutdown( );
+	envSetNextLoad( exe, newargs );
+	exit( 0 );
+#else
 	int i = 0;
 	qboolean replacedArg = false;
 	size_t exelen;
@@ -596,6 +622,12 @@ qboolean Sys_NewInstance( const char *gamedir )
 	newargs[i++] = strdup( "-changegame" );
 	newargs[i] = NULL;
 
+#if XASH_PSVITA
+	// under normal circumstances it's always going to be the same path
+	exe = strdup( "app0:/eboot.bin" );
+	Host_Shutdown( );
+	sceAppMgrLoadExec( exe, newargs, NULL );
+#else
 	exelen = wai_getExecutablePath( NULL, 0, NULL );
 	exe = malloc( exelen + 1 );
 	wai_getExecutablePath( exe, exelen, NULL );
@@ -604,6 +636,7 @@ qboolean Sys_NewInstance( const char *gamedir )
 	Host_Shutdown();
 
 	execv( exe, newargs );
+#endif
 
 	// if execv returned, it's probably an error
 	printf( "execv failed: %s", strerror( errno ));
@@ -612,6 +645,7 @@ qboolean Sys_NewInstance( const char *gamedir )
 		free( newargs[i] );
 	free( newargs );
 	free( exe );
+#endif
 
 	return false;
 }

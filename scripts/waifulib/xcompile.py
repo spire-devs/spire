@@ -30,6 +30,10 @@ ANDROID_NDK_API_MIN = { 10: 3, 19: 16, 20: 16, 23: 16, 25: 19 } # minimal API le
 ANDROID_STPCPY_API_MIN = 21 # stpcpy() introduced in SDK 21
 ANDROID_64BIT_API_MIN = 21 # minimal API level that supports 64-bit targets
 
+NSWITCH_ENVVARS = ['DEVKITPRO']
+
+PSVITA_ENVVARS = ['VITASDK']
+
 # This class does support ONLY r10e and r19c/r20 NDK
 class Android:
 	ctx            = None # waf context
@@ -348,6 +352,152 @@ class Android:
 				ldflags += ['-march=armv5te']
 		return ldflags
 
+class NintendoSwitch:
+	ctx          = None # waf context
+	arch         = "arm64"
+	dkp_dir      = None
+	portlibs_dir = None
+	dka64_dir    = None
+	libnx_dir    = None
+
+	def __init__(self, ctx):
+		self.ctx = ctx
+
+		for i in NSWITCH_ENVVARS:
+			self.dkp_dir = os.getenv(i)
+			if self.dkp_dir != None:
+				break
+		else:
+			ctx.fatal('Set %s environment variable pointing to the DEVKITPRO home!' %
+				' or '.join(NSWITCH_ENVVARS))
+
+		self.dkp_dir = os.path.abspath(self.dkp_dir)
+
+		self.dka64_dir = os.path.join(self.dkp_dir, 'devkitA64')
+		if not os.path.exists(self.dka64_dir):
+			ctx.fatal('devkitA64 not found in `%s`. Install devkitA64!' % self.dka64_dir)
+
+		self.libnx_dir = os.path.join(self.dkp_dir, 'libnx')
+		if not os.path.exists(self.libnx_dir):
+			ctx.fatal('libnx not found in `%s`. Install libnx!' % self.libnx_dir)
+
+		self.portlibs_dir = os.path.join(self.dkp_dir, 'portlibs', 'switch')
+		if not os.path.exists(self.portlibs_dir):
+			ctx.fatal('No Switch libraries found in `%s`!' % self.portlibs_dir)
+
+	def gen_toolchain_prefix(self):
+		return 'aarch64-none-elf-'
+
+	def gen_gcc_toolchain_path(self):
+		return os.path.join(self.dka64_dir, 'bin', self.gen_toolchain_prefix())
+
+	def cc(self):
+		return self.gen_gcc_toolchain_path() + 'gcc'
+
+	def cxx(self):
+		return self.gen_gcc_toolchain_path() + 'g++'
+
+	def strip(self):
+		return self.gen_gcc_toolchain_path() + 'strip'
+
+	def pkgconfig(self):
+		# counter-intuitively, this motherfucker is in $DEVKITPRO/portlibs/switch/bin
+		return os.path.join(self.portlibs_dir, 'bin', self.gen_toolchain_prefix() + 'pkg-config')
+
+	def cflags(self, cxx = False):
+		cflags = []
+		# arch flags
+		cflags += ['-D__SWITCH__', '-march=armv8-a+crc+crypto', '-mtune=cortex-a57', '-mtp=soft', '-ftls-model=local-exec', '-fPIE']
+		# help the linker out
+		cflags += ['-ffunction-sections', '-fdata-sections']
+		# base include dirs
+		cflags += ['-isystem %s/include' % self.libnx_dir, '-I%s/include' % self.portlibs_dir]
+		# the game wants GNU extensions
+		if cxx:
+			cflags += ['-std=gnu++17', '-D_GNU_SOURCE']
+		else:
+			cflags += ['-std=gnu11', '-D_GNU_SOURCE']
+		return cflags
+
+	# they go before object list
+	def linkflags(self):
+		linkflags = ['-fPIE', '-specs=%s/switch.specs' % self.libnx_dir]
+		# libsolder only supports sysv hashes and we need to build everything with -rdynamic
+		linkflags += ['-Wl,--hash-style=sysv', '-rdynamic']
+		# avoid pulling in and exposing mesa's internals, that crashes it for some god forsaken reason
+		linkflags += ['-Wl,--exclude-libs=libglapi.a', '-Wl,--exclude-libs=libdrm_nouveau.a']
+		return linkflags
+
+	def ldflags(self):
+		# NOTE: shared libraries should be built without standard libs, so that they could import their contents from the NRO,
+		# but executables, including the SDL2 sanity check, will generally require libstdc++ and libm, which we will add manually
+		ldflags = [] # ['-lm', '-lstdc++']
+		return ldflags
+
+class PSVita:
+	ctx          = None # waf context
+	arch         ='armeabi-v7a-hard'
+	vitasdk_dir  = None
+
+	def __init__(self, ctx):
+		self.ctx = ctx
+
+		for i in PSVITA_ENVVARS:
+			self.vitasdk_dir = os.getenv(i)
+			if self.vitasdk_dir != None:
+				break
+		else:
+			ctx.fatal('Set %s environment variable pointing to the VitaSDK directory!' %
+				' or '.join(PSVITA_ENVVARS))
+
+	def gen_toolchain_prefix(self):
+		return 'arm-vita-eabi-'
+
+	def gen_gcc_toolchain_path(self):
+		return os.path.join(self.vitasdk_dir, 'bin', self.gen_toolchain_prefix())
+
+	def cc(self):
+		return self.gen_gcc_toolchain_path() + 'gcc'
+
+	def cxx(self):
+		return self.gen_gcc_toolchain_path() + 'g++'
+
+	def strip(self):
+		return self.gen_gcc_toolchain_path() + 'strip'
+
+	def ar(self):
+		return self.gen_gcc_toolchain_path() + 'ar'
+
+	def pkgconfig(self):
+		return self.gen_gcc_toolchain_path() + 'pkg-config'
+
+	def cflags(self, cxx = False):
+		cflags = []
+		# arch flags
+		cflags += ['-D__vita__', '-mtune=cortex-a9', '-mfpu=neon']
+		# necessary linker flags
+		cflags += ['-Wl,-q', '-Wl,-z,nocopyreloc']
+		# this optimization is broken in vitasdk
+		cflags += ['-fno-optimize-sibling-calls']
+		# disable some ARM bullshit
+		cflags += ['-fno-short-enums', '-Wno-attributes']
+		# base include dir
+		cflags += ['-isystem %s/arm-vita-eabi/include' % self.vitasdk_dir]
+		# SDL include dir
+		cflags += ['-I%s/arm-vita-eabi/include/SDL2' % self.vitasdk_dir]
+		return cflags
+
+	# they go before object list
+	def linkflags(self):
+		linkflags = ['-Wl,--hash-style=sysv', '-Wl,-q', '-Wl,-z,nocopyreloc', '-mtune=cortex-a9', '-mfpu=neon']
+		# enforce no-short-enums again
+		linkflags += ['-Wl,-no-enum-size-warning', '-fno-short-enums']
+		return linkflags
+
+	def ldflags(self):
+		ldflags = []
+		return ldflags
+
 def options(opt):
 	xc = opt.add_option_group('Cross compile options')
 	xc.add_option('--android', action='store', dest='ANDROID_OPTS', default=None,
@@ -356,6 +506,10 @@ def options(opt):
 		help='enable building for Motorola MAGX [default: %default]')
 	xc.add_option('--enable-msvc-wine', action='store_true', dest='MSVC_WINE', default=False,
 		help='enable building with MSVC using Wine [default: %default]')
+	xc.add_option('--nswitch', action='store_true', dest='NSWITCH', default = False,
+		help ='enable building for Nintendo Switch [default: %default]')
+	xc.add_option('--psvita', action='store_true', dest='PSVITA', default = False,
+		help ='enable building for PlayStation Vita [default: %default]')
 
 def configure(conf):
 	if conf.options.ANDROID_OPTS:
@@ -408,10 +562,38 @@ def configure(conf):
 		conf.env.DEST_OS = 'win32'
 		conf.env.DEST_CPU = conf.env.MSVC_TARGETS[0]
 		conf.env.COMPILER_CXX = conf.env.COMPILER_CC = 'msvc'
+	elif conf.options.NSWITCH:
+		conf.nswitch = nswitch = NintendoSwitch(conf)
+		conf.environ['CC'] = nswitch.cc()
+		conf.environ['CXX'] = nswitch.cxx()
+		conf.environ['STRIP'] = nswitch.strip()
+		conf.env.PKGCONFIG = nswitch.pkgconfig()
+		conf.env.CFLAGS += nswitch.cflags()
+		conf.env.CXXFLAGS += nswitch.cflags(True)
+		conf.env.LINKFLAGS += nswitch.linkflags()
+		conf.env.LDFLAGS += nswitch.ldflags()
+		conf.env.HAVE_M = True
+		conf.env.LIB_M = ['m']
+		conf.env.DEST_OS = 'nswitch'
+	elif conf.options.PSVITA:
+		conf.psvita = psvita = PSVita(conf)
+		conf.environ['CC'] = psvita.cc()
+		conf.environ['CXX'] = psvita.cxx()
+		conf.environ['STRIP'] = psvita.strip()
+		conf.environ['AR'] = psvita.ar()
+		conf.env.PKGCONFIG = psvita.pkgconfig()
+		conf.env.CFLAGS += psvita.cflags()
+		conf.env.CXXFLAGS += psvita.cflags(True)
+		conf.env.LINKFLAGS += psvita.linkflags()
+		conf.env.LDFLAGS += psvita.ldflags()
+		conf.env.HAVE_M = True
+		conf.env.LIB_M = ['m']
+		conf.env.VRTLD = ['vrtld']
+		conf.env.DEST_OS = 'psvita'
 
 	conf.env.MAGX = conf.options.MAGX
 	conf.env.MSVC_WINE = conf.options.MSVC_WINE
-	MACRO_TO_DESTOS = OrderedDict({ '__ANDROID__' : 'android' })
+	MACRO_TO_DESTOS = OrderedDict({ '__ANDROID__' : 'android', '__SWITCH__' : 'nswitch', '__vita__' : 'psvita' })
 	for k in c_config.MACRO_TO_DESTOS:
 		MACRO_TO_DESTOS[k] = c_config.MACRO_TO_DESTOS[k] # ordering is important
 	c_config.MACRO_TO_DESTOS  = MACRO_TO_DESTOS

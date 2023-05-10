@@ -432,7 +432,7 @@ void SV_ConnectClient( netadr_t from )
 
 	// build protinfo answer
 	protinfo[0] = '\0';
-	Info_SetValueForKey( protinfo, "ext", va( "%d", newcl->extensions ), sizeof( protinfo ) );
+	Info_SetValueForKeyf( protinfo, "ext", sizeof( protinfo ), "%d", newcl->extensions );
 
 	// send the connect packet to the client
 	Netchan_OutOfBandPrint( NS_SERVER, from, "client_connect %s", protinfo );
@@ -475,7 +475,7 @@ void SV_ConnectClient( netadr_t from )
 	Log_Printf( "\"%s<%i><%i><>\" connected, address \"%s\"\n", newcl->name, newcl->userid, i, NET_AdrToString( newcl->netchan.remote_address ));
 
 	if( count == 1 || count == svs.maxclients )
-		svs.last_heartbeat = MAX_HEARTBEAT;
+		NET_MasterClear();
 }
 
 /*
@@ -542,7 +542,7 @@ edict_t *SV_FakeConnect( const char *netname )
 	cl->state = cs_spawned;
 
 	if( count == 1 || count == svs.maxclients )
-		svs.last_heartbeat = MAX_HEARTBEAT;
+		NET_MasterClear();
 
 	return cl->edict;
 }
@@ -619,7 +619,7 @@ void SV_DropClient( sv_client_t *cl, qboolean crash )
 	}
 
 	if( i == svs.maxclients )
-		svs.last_heartbeat = MAX_HEARTBEAT;
+		NET_MasterClear();
 }
 
 /*
@@ -852,39 +852,53 @@ The second parameter should be the current protocol version number.
 */
 void SV_Info( netadr_t from, int protocolVersion )
 {
-	char	string[MAX_INFO_STRING];
+	char s[512];
 
 	// ignore in single player
 	if( svs.maxclients == 1 || !svs.initialized )
 		return;
 
-	string[0] = '\0';
+	s[0] = '\0';
 
 	if( protocolVersion != PROTOCOL_VERSION )
 	{
-		Q_snprintf( string, sizeof( string ), "%s: wrong version\n", hostname.string );
+		Q_snprintf( s, sizeof( s ), "%s: wrong version\n", hostname.string );
 	}
 	else
 	{
-		int i, count, bots;
-		qboolean havePassword = COM_CheckStringEmpty( sv_password.string );
+		int count;
+		int bots;
+		int remaining;
+		char temp[sizeof( s )];
+		qboolean have_password = COM_CheckStringEmpty( sv_password.string );
 
 		SV_GetPlayerCount( &count, &bots );
 
 		// a1ba: send protocol version to distinguish old engine and new
-		Info_SetValueForKey( string, "p", va( "%i", PROTOCOL_VERSION ), MAX_INFO_STRING );
-		Info_SetValueForKey( string, "host", hostname.string, MAX_INFO_STRING );
-		Info_SetValueForKey( string, "map", sv.name, MAX_INFO_STRING );
-		Info_SetValueForKey( string, "dm", va( "%i", (int)svgame.globals->deathmatch ), MAX_INFO_STRING );
-		Info_SetValueForKey( string, "team", va( "%i", (int)svgame.globals->teamplay ), MAX_INFO_STRING );
-		Info_SetValueForKey( string, "coop", va( "%i", (int)svgame.globals->coop ), MAX_INFO_STRING );
-		Info_SetValueForKey( string, "numcl", va( "%i", count ), MAX_INFO_STRING );
-		Info_SetValueForKey( string, "maxcl", va( "%i", svs.maxclients ), MAX_INFO_STRING );
-		Info_SetValueForKey( string, "gamedir", GI->gamefolder, MAX_INFO_STRING );
-		Info_SetValueForKey( string, "password", havePassword ? "1" : "0", MAX_INFO_STRING );
+		Info_SetValueForKeyf( s, "p", sizeof( s ), "%i", PROTOCOL_VERSION );
+		Info_SetValueForKey( s, "map", sv.name, sizeof( s ));
+		Info_SetValueForKey( s, "dm", svgame.globals->deathmatch ? "1" : "0", sizeof( s ));
+		Info_SetValueForKey( s, "team", svgame.globals->teamplay ? "1" : "0", sizeof( s ));
+		Info_SetValueForKey( s, "coop", svgame.globals->coop ? "1" : "0", sizeof( s ));
+		Info_SetValueForKeyf( s, "numcl", sizeof( s ), "%i", count );
+		Info_SetValueForKeyf( s, "maxcl", sizeof( s ), "%i", svs.maxclients );
+		Info_SetValueForKey( s, "gamedir", GI->gamefolder, sizeof( s ));
+		Info_SetValueForKey( s, "password", have_password ? "1" : "0", sizeof( s ));
+
+		// write host last so we can try to cut off too long hostnames
+		// TODO: value size limit for infostrings
+		remaining = sizeof( s ) - Q_strlen( s ) - sizeof( "\\host\\" ) - 1;
+		if( remaining < 0 )
+		{
+			// should never happen?
+			Con_Printf( S_ERROR "SV_Info: infostring overflow!\n" );
+			return;
+		}
+		Q_strncpy( temp, hostname.string, remaining );
+		Info_SetValueForKey( s, "host", temp, sizeof( s ));
 	}
 
-	Netchan_OutOfBandPrint( NS_SERVER, from, "info\n%s", string );
+	Netchan_OutOfBandPrint( NS_SERVER, from, "info\n%s", s );
 }
 
 /*
@@ -930,15 +944,26 @@ void SV_BuildNetAnswer( netadr_t from )
 	}
 	else if( type == NETAPI_REQUEST_PLAYERS )
 	{
+		size_t len = 0;
+
 		string[0] = '\0';
 
 		for( i = 0; i < svs.maxclients; i++ )
 		{
 			if( svs.clients[i].state >= cs_connected )
 			{
+				int ret;
 				edict_t *ed = svs.clients[i].edict;
 				float time = host.realtime - svs.clients[i].connection_started;
-				Q_strncat( string, va( "%c\\%s\\%i\\%f\\", count, svs.clients[i].name, (int)ed->v.frags, time ), sizeof( string ));
+				ret = Q_snprintf( &string[len], sizeof( string ) - len, "%c\\%s\\%i\\%f\\", count, svs.clients[i].name, (int)ed->v.frags, time );
+
+				if( ret == -1 )
+				{
+					Con_DPrintf( S_WARN "SV_BuildNetAnswer: NETAPI_REQUEST_PLAYERS: buffer overflow!\n" );
+					break;
+				}
+
+				len += ret;
 				count++;
 			}
 		}
@@ -955,8 +980,8 @@ void SV_BuildNetAnswer( netadr_t from )
 		string[0] = '\0';
 		Info_SetValueForKey( string, "hostname", hostname.string, MAX_INFO_STRING );
 		Info_SetValueForKey( string, "gamedir", GI->gamefolder, MAX_INFO_STRING );
-		Info_SetValueForKey( string, "current", va( "%i", count ), MAX_INFO_STRING );
-		Info_SetValueForKey( string, "max", va( "%i", svs.maxclients ), MAX_INFO_STRING );
+		Info_SetValueForKeyf( string, "current", MAX_INFO_STRING, "%i", count );
+		Info_SetValueForKeyf( string, "max", MAX_INFO_STRING, "%i", svs.maxclients );
 		Info_SetValueForKey( string, "map", sv.name, MAX_INFO_STRING );
 
 		// send serverinfo
@@ -1013,6 +1038,9 @@ void SV_RemoteCommand( netadr_t from, sizebuf_t *msg )
 	char		remaining[1024];
 	int		i;
 
+	if( !rcon_enable.value )
+		return;
+
 	Con_Printf( "Rcon from %s:\n%s\n", NET_AdrToString( from ), MSG_GetData( msg ) + 4 );
 	Log_Printf( "Rcon: \"%s\" from \"%s\"\n", MSG_GetData( msg ) + 4, NET_AdrToString( from ));
 	SV_BeginRedirect( from, RD_PACKET, outputbuf, sizeof( outputbuf ) - 16, SV_FlushRedirect );
@@ -1022,8 +1050,8 @@ void SV_RemoteCommand( netadr_t from, sizebuf_t *msg )
 		remaining[0] = 0;
 		for( i = 2; i < Cmd_Argc(); i++ )
 		{
-			Q_strcat( remaining, Cmd_Argv( i ));
-			Q_strcat( remaining, " " );
+			Q_strncat( remaining, Cmd_Argv( i ), sizeof( remaining ));
+			Q_strncat( remaining, " ", sizeof( remaining ));
 		}
 		Cmd_ExecuteString( remaining );
 	}
@@ -1392,7 +1420,7 @@ void SV_PutClientInServer( sv_client_t *cl )
 	if( svgame.globals->cdAudioTrack )
 	{
 		MSG_BeginServerCmd( &msg, svc_stufftext );
-		MSG_WriteString( &msg, va( "cd loop %3d\n", svgame.globals->cdAudioTrack ));
+		MSG_WriteStringf( &msg, "cd loop %3d\n", svgame.globals->cdAudioTrack );
 		svgame.globals->cdAudioTrack = 0;
 	}
 
@@ -1604,6 +1632,7 @@ static qboolean SV_New_f( sv_client_t *cl )
 	sizebuf_t		msg;
 	int		i;
 
+	memset( msg_buf, 0, sizeof( msg_buf ));
 	MSG_Init( &msg, "New", msg_buf, sizeof( msg_buf ));
 
 	if( cl->state != cs_connected )
@@ -1631,7 +1660,7 @@ static qboolean SV_New_f( sv_client_t *cl )
 
 	// server info string
 	MSG_BeginServerCmd( &msg, svc_stufftext );
-	MSG_WriteString( &msg, va( "fullserverinfo \"%s\"\n", SV_Serverinfo( )));
+	MSG_WriteStringf( &msg, "fullserverinfo \"%s\"\n", SV_Serverinfo( ));
 
 	// collect the info about all the players and send to me
 	for( i = 0, cur = svs.clients; i < svs.maxclients; i++, cur++ )
@@ -1954,6 +1983,7 @@ static qboolean SV_SendRes_f( sv_client_t *cl )
 	if( cl->state != cs_connected )
 		return false;
 
+	memset( buffer, 0, sizeof( buffer ));
 	MSG_Init( &msg, "SendResources", buffer, sizeof( buffer ));
 
 	if( svs.maxclients > 1 && FBitSet( cl->flags, FCL_SEND_RESOURCES ))
@@ -2106,6 +2136,8 @@ static qboolean SV_Begin_f( sv_client_t *cl )
 
 	// now client is spawned
 	cl->state = cs_spawned;
+	cl->connecttime = host.realtime;
+
 	return true;
 }
 
@@ -2116,8 +2148,8 @@ SV_SendBuildInfo_f
 */
 static qboolean SV_SendBuildInfo_f( sv_client_t *cl )
 {
-	SV_ClientPrintf( cl, "Server running %s %s (build %i-%s, %s-%s)\n",
-		XASH_ENGINE_NAME, XASH_VERSION, Q_buildnum(), Q_buildcommit(), Q_buildos(), Q_buildarch() );
+	SV_ClientPrintf( cl, "Server running " XASH_ENGINE_NAME " " XASH_VERSION " (build %i-%s, %s-%s)\n",
+		Q_buildnum(), Q_buildcommit(), Q_buildos(), Q_buildarch() );
 	return true;
 }
 
@@ -2708,15 +2740,15 @@ static void SV_EntSendVars( sv_client_t *cl, edict_t *ent )
 		return;
 
 	MSG_WriteByte( &cl->netchan.message, svc_stufftext );
-	MSG_WriteString( &cl->netchan.message, va( "set ent_last_name \"%s\"\n", STRING( ent->v.targetname ) ));
+	MSG_WriteStringf( &cl->netchan.message, "set ent_last_name \"%s\"\n", STRING( ent->v.targetname ));
 	MSG_WriteByte( &cl->netchan.message, svc_stufftext );
-	MSG_WriteString( &cl->netchan.message, va( "set ent_last_num %i\n", NUM_FOR_EDICT( ent ) ));
+	MSG_WriteStringf( &cl->netchan.message, "set ent_last_num %i\n", NUM_FOR_EDICT( ent ));
 	MSG_WriteByte( &cl->netchan.message, svc_stufftext );
-	MSG_WriteString( &cl->netchan.message, va( "set ent_last_inst !%i_%i\n", NUM_FOR_EDICT( ent ), ent->serialnumber ));
+	MSG_WriteStringf( &cl->netchan.message, "set ent_last_inst !%i_%i\n", NUM_FOR_EDICT( ent ), ent->serialnumber );
 	MSG_WriteByte( &cl->netchan.message, svc_stufftext );
-	MSG_WriteString( &cl->netchan.message, va( "set ent_last_origin \"%f %f %f\"\n", ent->v.origin[0], ent->v.origin[1], ent->v.origin[2]));
+	MSG_WriteStringf( &cl->netchan.message, "set ent_last_origin \"%f %f %f\"\n", ent->v.origin[0], ent->v.origin[1], ent->v.origin[2] );
 	MSG_WriteByte( &cl->netchan.message, svc_stufftext );
-	MSG_WriteString( &cl->netchan.message, va( "set ent_last_class \"%s\"\n", STRING( ent->v.classname )));
+	MSG_WriteStringf( &cl->netchan.message, "set ent_last_class \"%s\"\n", STRING( ent->v.classname ));
 	MSG_WriteByte( &cl->netchan.message, svc_stufftext );
 	MSG_WriteString( &cl->netchan.message, "ent_getvars_cb\n" ); // why do we need this?
 }
@@ -2956,7 +2988,7 @@ void SV_ExecuteClientCommand( sv_client_t *cl, const char *s )
 			{
 				Con_Reportf( "enttools->%s(): %s\n", u->name, s );
 				Log_Printf( "\"%s<%i><%s><>\" performed: %s\n", Info_ValueForKey( cl->userinfo, "name" ),
-							cl->userid, SV_GetClientIDString( cl ), NET_AdrToString( cl->netchan.remote_address ), s );
+							cl->userid, SV_GetClientIDString( cl ), s );
 
 				if( u->func )
 					u->func( cl );
@@ -3084,16 +3116,11 @@ void SV_ConnectionlessPacket( netadr_t from, sizebuf_t *msg )
 	else if( !Q_strcmp( pcmd, "s" )) SV_AddToMaster( from, msg );
 	else if( !Q_strcmp( pcmd, "T" "Source" )) SV_TSourceEngineQuery( from );
 	else if( !Q_strcmp( pcmd, "i" )) NET_SendPacket( NS_SERVER, 5, "\xFF\xFF\xFF\xFFj", from ); // A2A_PING
-	else if (!Q_strcmp( pcmd, "c" ))
+	else if( !Q_strcmp( pcmd, "c" ) && sv_nat.value && NET_IsMasterAdr( from ))
 	{
-		qboolean sv_nat = Cvar_VariableInteger( "sv_nat" );
-		if( sv_nat )
-		{
-			netadr_t to;
-
-			if( NET_StringToAdr( Cmd_Argv( 1 ), &to ) && !NET_IsReservedAdr( to ))
-				SV_Info( to, PROTOCOL_VERSION );
-		}
+		netadr_t to;
+		if( NET_StringToAdr( Cmd_Argv( 1 ), &to ) && !NET_IsReservedAdr( to ))
+			SV_Info( to, PROTOCOL_VERSION );
 	}
 	else if( svgame.dllFuncs.pfnConnectionlessPacket( &from, args, buf, &len ))
 	{
@@ -3357,8 +3384,8 @@ void SV_ParseCvarValue2( sv_client_t *cl, sizebuf_t *msg )
 	string	name, value;
 	int	requestID = MSG_ReadLong( msg );
 
-	Q_strcpy( name, MSG_ReadString( msg ));
-	Q_strcpy( value, MSG_ReadString( msg ));
+	Q_strncpy( name, MSG_ReadString( msg ), sizeof( name ));
+	Q_strncpy( value, MSG_ReadString( msg ), sizeof( value ));
 
 	if( svgame.dllFuncs2.pfnCvarValue2 != NULL )
 		svgame.dllFuncs2.pfnCvarValue2( cl->edict, requestID, name, value );

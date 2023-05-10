@@ -276,8 +276,6 @@ void S_RawEntSamples( int entnum, uint samples, uint rate, word width, word chan
 void S_RawSamples( uint samples, uint rate, word width, word channels, const byte *data, int entnum );
 void S_StopSound( int entnum, int channel, const char *soundname );
 void S_UpdateFrame( struct ref_viewpass_s *rvp );
-uint S_GetRawSamplesLength( int entnum );
-void S_ClearRawChannel( int entnum );
 void S_StopAllSounds( qboolean ambient );
 void S_FreeSounds( void );
 
@@ -306,6 +304,7 @@ void S_FadeMusicVolume( float fadePercent );
 //
 int S_ZeroCrossingAfter( wavdata_t *pWaveData, int sample );
 int S_ZeroCrossingBefore( wavdata_t *pWaveData, int sample );
+int S_ConvertLoopedPosition( wavdata_t *pSource, int samplePosition, qboolean use_loop );
 int S_GetOutputData( wavdata_t *pSource, void **pData, int samplePosition, int sampleCount, qboolean use_loop );
 void S_SetSampleStart( channel_t *pChan, wavdata_t *pSource, int newPosition );
 void S_SetSampleEnd( channel_t *pChan, wavdata_t *pSource, int newEndPosition );

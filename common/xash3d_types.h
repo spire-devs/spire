@@ -4,6 +4,10 @@
 
 #include "build.h"
 
+#if XASH_IRIX
+#include <port.h>
+#endif
+
 #if XASH_WIN32
 #include <wchar.h> // off_t
 #endif // _WIN32
@@ -23,7 +27,12 @@ typedef byte		rgba_t[4];	// unsigned byte colorpack
 typedef byte		rgb_t[3];		// unsigned byte colorpack
 typedef vec_t		matrix3x4[3][4];
 typedef vec_t		matrix4x4[4][4];
+
+#if XASH_64BIT
 typedef uint32_t        poolhandle_t;
+#else
+typedef void*           poolhandle_t;
+#endif
 
 #undef true
 #undef false
@@ -41,6 +50,7 @@ typedef uint64_t longtime_t;
 #define MAX_SERVERINFO_STRING	512	// server handles too many settings. expand to 1024?
 #define MAX_LOCALINFO_STRING	32768	// localinfo used on server and not sended to the clients
 #define MAX_SYSPATH		1024	// system filepath
+#define MAX_VA_STRING	1024	// string length returned by va()
 #define MAX_PRINT_MSG	8192	// how many symbols can handle single call of Con_Printf or Con_DPrintf
 #define MAX_TOKEN		2048	// parse token length
 #define MAX_MODS		512	// environment games that engine can keep visible

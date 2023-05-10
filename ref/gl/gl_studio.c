@@ -150,6 +150,11 @@ void R_StudioInit( void )
 	r_studio_sort_textures = gEngfuncs.Cvar_Get( "r_studio_sort_textures", "0", FCVAR_GLCONFIG, "change draw order for additive meshes" );
 	r_studio_drawelements = gEngfuncs.Cvar_Get( "r_studio_drawelements", "1", FCVAR_GLCONFIG, "use glDrawElements for studiomodels" );
 
+#if XASH_PSVITA
+	// don't do the same array-building work twice since that's what our FFP shim does anyway
+	gEngfuncs.Cvar_FullSet( "r_studio_drawelements", "0", FCVAR_READ_ONLY );
+#endif
+
 	Matrix3x4_LoadIdentity( g_studio.rotationmatrix );
 
 	// g-cont. cvar disabled by Valve
@@ -173,7 +178,7 @@ static void R_StudioSetupTimings( void )
 	{
 		// synchronize with server time
 		g_studio.time = gpGlobals->time;
-		g_studio.frametime = gpGlobals->time -   gpGlobals->oldtime;
+		g_studio.frametime = gpGlobals->time - gpGlobals->oldtime;
 	}
 	else
 	{
@@ -621,14 +626,14 @@ StudioEstimateFrame
 
 ====================
 */
-float R_StudioEstimateFrame( cl_entity_t *e, mstudioseqdesc_t *pseqdesc )
+float R_StudioEstimateFrame( cl_entity_t *e, mstudioseqdesc_t *pseqdesc, double time )
 {
 	double	dfdt, f;
 
 	if( g_studio.interpolate )
 	{
-		if( g_studio.time < e->curstate.animtime ) dfdt = 0.0;
-		else dfdt = (g_studio.time - e->curstate.animtime) * e->curstate.framerate * pseqdesc->fps;
+		if( time < e->curstate.animtime ) dfdt = 0.0;
+		else dfdt = (time - e->curstate.animtime) * e->curstate.framerate * pseqdesc->fps;
 	}
 	else dfdt = 0;
 
@@ -670,35 +675,6 @@ float R_StudioEstimateInterpolant( cl_entity_t *e )
 
 	return dadt;
 }
-
-/*
-====================
-CL_GetSequenceDuration
-
-====================
-*/
-float CL_GetSequenceDuration( cl_entity_t *ent, int sequence )
-{
-	studiohdr_t	*pstudiohdr;
-	mstudioseqdesc_t	*pseqdesc;
-
-	if( ent->model != NULL && ent->model->type == mod_studio )
-	{
-		pstudiohdr = (studiohdr_t *)gEngfuncs.Mod_Extradata( mod_studio, ent->model );
-
-		if( pstudiohdr )
-		{
-			sequence = bound( 0, sequence, pstudiohdr->numseq - 1 );
-			pseqdesc = (mstudioseqdesc_t *)((byte *)pstudiohdr + pstudiohdr->seqindex) + sequence;
-
-			if( pseqdesc->numframes > 1 && pseqdesc->fps > 0 )
-				return (float)pseqdesc->numframes / (float)pseqdesc->fps;
-		}
-	}
-
-	return 0.1f;
-}
-
 
 /*
 ====================
@@ -847,8 +823,8 @@ void R_StudioCalcRotations( cl_entity_t *e, float pos[][3], vec4_t *q, mstudiose
 
 	for( i = 0; i < m_pStudioHeader->numbones; i++, pbone++, panim++ )
 	{
-		gEngfuncs.R_StudioCalcBoneQuaternion( frame, s, pbone, panim, adj, q[i] );
-		gEngfuncs.R_StudioCalcBonePosition( frame, s, pbone, panim, adj, pos[i] );
+		R_StudioCalcBoneQuaternion( frame, s, pbone, panim, adj, q[i] );
+		R_StudioCalcBonePosition( frame, s, pbone, panim, adj, pos[i] );
 	}
 
 	if( pseqdesc->motiontype & STUDIO_X ) pos[pseqdesc->motionbone][0] = 0.0f;
@@ -878,7 +854,7 @@ void R_StudioMergeBones( cl_entity_t *e, model_t *m_pSubModel )
 
 	pseqdesc = (mstudioseqdesc_t *)((byte *)m_pStudioHeader + m_pStudioHeader->seqindex) + e->curstate.sequence;
 
-	f = R_StudioEstimateFrame( e, pseqdesc );
+	f = R_StudioEstimateFrame( e, pseqdesc, g_studio.time );
 
 	panim = gEngfuncs.R_StudioGetAnim( m_pStudioHeader, m_pSubModel, pseqdesc );
 	R_StudioCalcRotations( e, pos, q, pseqdesc, panim, f );
@@ -944,7 +920,7 @@ void R_StudioSetupBones( cl_entity_t *e )
 
 	pseqdesc = (mstudioseqdesc_t *)((byte *)m_pStudioHeader + m_pStudioHeader->seqindex) + e->curstate.sequence;
 
-	f = R_StudioEstimateFrame( e, pseqdesc );
+	f = R_StudioEstimateFrame( e, pseqdesc, g_studio.time );
 
 	panim = gEngfuncs.R_StudioGetAnim( m_pStudioHeader, RI.currentmodel, pseqdesc );
 	R_StudioCalcRotations( e, pos, q, pseqdesc, panim, f );
@@ -960,7 +936,7 @@ void R_StudioSetupBones( cl_entity_t *e )
 		dadt = R_StudioEstimateInterpolant( e );
 		s = (e->curstate.blending[0] * dadt + e->latched.prevblending[0] * (1.0f - dadt)) / 255.0f;
 
-		gEngfuncs.R_StudioSlerpBones( m_pStudioHeader->numbones, q, pos, q2, pos2, s );
+		R_StudioSlerpBones( m_pStudioHeader->numbones, q, pos, q2, pos2, s );
 
 		if( pseqdesc->numblends == 4 )
 		{
@@ -971,10 +947,10 @@ void R_StudioSetupBones( cl_entity_t *e )
 			R_StudioCalcRotations( e, pos4, q4, pseqdesc, panim, f );
 
 			s = (e->curstate.blending[0] * dadt + e->latched.prevblending[0] * (1.0f - dadt)) / 255.0f;
-			gEngfuncs.R_StudioSlerpBones( m_pStudioHeader->numbones, q3, pos3, q4, pos4, s );
+			R_StudioSlerpBones( m_pStudioHeader->numbones, q3, pos3, q4, pos4, s );
 
 			s = (e->curstate.blending[1] * dadt + e->latched.prevblending[1] * (1.0f - dadt)) / 255.0f;
-			gEngfuncs.R_StudioSlerpBones( m_pStudioHeader->numbones, q, pos, q3, pos3, s );
+			R_StudioSlerpBones( m_pStudioHeader->numbones, q, pos, q3, pos3, s );
 		}
 	}
 
@@ -997,7 +973,7 @@ void R_StudioSetupBones( cl_entity_t *e )
 			R_StudioCalcRotations( e, pos2, q2, pseqdesc, panim, e->latched.prevframe );
 
 			s = (e->latched.prevseqblending[0]) / 255.0f;
-			gEngfuncs.R_StudioSlerpBones( m_pStudioHeader->numbones, q1b, pos1b, q2, pos2, s );
+			R_StudioSlerpBones( m_pStudioHeader->numbones, q1b, pos1b, q2, pos2, s );
 
 			if( pseqdesc->numblends == 4 )
 			{
@@ -1008,15 +984,15 @@ void R_StudioSetupBones( cl_entity_t *e )
 				R_StudioCalcRotations( e, pos4, q4, pseqdesc, panim, e->latched.prevframe );
 
 				s = (e->latched.prevseqblending[0]) / 255.0f;
-				gEngfuncs.R_StudioSlerpBones( m_pStudioHeader->numbones, q3, pos3, q4, pos4, s );
+				R_StudioSlerpBones( m_pStudioHeader->numbones, q3, pos3, q4, pos4, s );
 
 				s = (e->latched.prevseqblending[1]) / 255.0f;
-				gEngfuncs.R_StudioSlerpBones( m_pStudioHeader->numbones, q1b, pos1b, q3, pos3, s );
+				R_StudioSlerpBones( m_pStudioHeader->numbones, q1b, pos1b, q3, pos3, s );
 			}
 		}
 
 		s = 1.0f - ( g_studio.time - e->latched.sequencetime ) / 0.2f;
-		gEngfuncs.R_StudioSlerpBones( m_pStudioHeader->numbones, q, pos, q1b, pos1b, s );
+		R_StudioSlerpBones( m_pStudioHeader->numbones, q, pos, q1b, pos1b, s );
 	}
 	else
 	{
@@ -1260,18 +1236,18 @@ void R_StudioSetupChrome( float *pchrome, int bone, vec3_t normal )
 		vec3_t	tmp;		// vector pointing at bone in world reference frame
 
 		VectorNegate( g_studio.chrome_origin, tmp );
-		tmp[0] += g_studio.bonestransform[bone][0][3];
-		tmp[1] += g_studio.bonestransform[bone][1][3];
-		tmp[2] += g_studio.bonestransform[bone][2][3];
+		tmp[0] += g_studio.lighttransform[bone][0][3];
+		tmp[1] += g_studio.lighttransform[bone][1][3];
+		tmp[2] += g_studio.lighttransform[bone][2][3];
 
 		VectorNormalize( tmp );
 		CrossProduct( tmp, RI.vright, chromeupvec );
 		VectorNormalize( chromeupvec );
-		CrossProduct( tmp, chromeupvec, chromerightvec );
+		CrossProduct( chromeupvec, tmp, chromerightvec );
 		VectorNormalize( chromerightvec );
 
-		Matrix3x4_VectorIRotate( g_studio.bonestransform[bone], chromeupvec, g_studio.chromeup[bone] );
-		Matrix3x4_VectorIRotate( g_studio.bonestransform[bone], chromerightvec, g_studio.chromeright[bone] );
+		Matrix3x4_VectorIRotate( g_studio.lighttransform[bone], chromeupvec, g_studio.chromeup[bone] );
+		Matrix3x4_VectorIRotate( g_studio.lighttransform[bone], chromerightvec, g_studio.chromeright[bone] );
 
 		g_studio.chromeage[bone] = g_studio.framecount;
 	}
@@ -1701,70 +1677,56 @@ R_LightLambert
 
 ====================
 */
-void R_LightLambert( vec4_t light[MAX_LOCALLIGHTS], vec3_t normal, vec3_t color, byte *out )
+static void R_LightLambert( vec4_t light[MAX_LOCALLIGHTS], const vec3_t normal, const vec3_t color, byte *out )
 {
 	vec3_t	finalLight;
-	vec3_t	localLight;
 	int	i;
+
+	if( !g_studio.numlocallights )
+	{
+		VectorScale( color, 255.0f, out );
+		return;
+	}
 
 	VectorCopy( color, finalLight );
 
 	for( i = 0; i < g_studio.numlocallights; i++ )
 	{
-		float	r, r2;
+		float	r;
 
-		if( tr.fFlipViewModel )
-			r = DotProduct( normal, light[i] );
-		else r = -DotProduct( normal, light[i] );
+		r = DotProduct( normal, light[i] );
+		if( likely( !tr.fFlipViewModel ))
+			r = -r;
 
 		if( r > 0.0f )
 		{
+			vec3_t localLight;
+			float temp;
+
 			if( light[i][3] == 0.0f )
 			{
-				r2 = DotProduct( light[i], light[i] );
+				float r2 = DotProduct( light[i], light[i] );
 
 				if( r2 > 0.0f )
 					light[i][3] = g_studio.locallightR2[i] / ( r2 * sqrt( r2 ));
 				else light[i][3] = 0.0001f;
 			}
 
-			localLight[0] = Q_min( g_studio.locallightcolor[i].r * r * light[i][3], 255.0f );
-			localLight[1] = Q_min( g_studio.locallightcolor[i].g * r * light[i][3], 255.0f );
-			localLight[2] = Q_min( g_studio.locallightcolor[i].b * r * light[i][3], 255.0f );
-			VectorScale( localLight, ( 1.0f / 255.0f ), localLight );
+			temp = Q_min( r * light[i][3] / 255.0f, 1.0f );
 
-			finalLight[0] = Q_min( finalLight[0] + localLight[0], 1.0f );
-			finalLight[1] = Q_min( finalLight[1] + localLight[1], 1.0f );
-			finalLight[2] = Q_min( finalLight[2] + localLight[2], 1.0f );
+			localLight[0] = (float)g_studio.locallightcolor[i].r * temp;
+			localLight[1] = (float)g_studio.locallightcolor[i].g * temp;
+			localLight[2] = (float)g_studio.locallightcolor[i].b * temp;
+
+			VectorAdd( finalLight, localLight, finalLight );
 		}
 	}
 
-	out[0] = finalLight[0] * 255;
-	out[1] = finalLight[1] * 255;
-	out[2] = finalLight[2] * 255;
-}
+	VectorScale( finalLight, 255.0f, finalLight );
 
-static void R_StudioSetColorBegin(short *ptricmds, vec3_t *pstudionorms )
-{
-	float	*lv = (float *)g_studio.lightvalues[ptricmds[1]];
-	rgba_t color;
-
-	if( g_studio.numlocallights )
-	{
-		color[3] = tr.blend * 255;
-		R_LightLambert( g_studio.lightpos[ptricmds[0]], pstudionorms[ptricmds[1]], lv, color );
-		pglColor4ubv( color );
-	}
-	else
-	{
-		if( RI.currententity->curstate.rendermode == kRenderTransColor )
-		{
-			color[3] = tr.blend * 255;
-			VectorCopy( (byte*)&RI.currententity->curstate.rendercolor, color );
-			pglColor4ubv( color );
-		}
-		else pglColor4f( lv[0], lv[1], lv[2], tr.blend );
-	}
+	out[0] = Q_min( (int)( finalLight[0] ), 255 );
+	out[1] = Q_min( (int)( finalLight[1] ), 255 );
+	out[2] = Q_min( (int)( finalLight[2] ), 255 );
 }
 
 static void R_StudioSetColorArray(short *ptricmds, vec3_t *pstudionorms, byte *color )
@@ -1772,20 +1734,15 @@ static void R_StudioSetColorArray(short *ptricmds, vec3_t *pstudionorms, byte *c
 	float	*lv = (float *)g_studio.lightvalues[ptricmds[1]];
 
 	color[3] = tr.blend * 255;
+	R_LightLambert( g_studio.lightpos[ptricmds[0]], pstudionorms[ptricmds[1]], lv, color );
+}
 
-	if( g_studio.numlocallights )
-		R_LightLambert( g_studio.lightpos[ptricmds[0]], pstudionorms[ptricmds[1]], lv, color );
-	else
-	{
-		if( RI.currententity->curstate.rendermode == kRenderTransColor )
-			VectorCopy(  (byte*)&RI.currententity->curstate.rendercolor, color );
-		else
-		{
-			color[0] = lv[0] * 255;
-			color[1] = lv[1] * 255;
-			color[2] = lv[2] * 255;
-		}
-	}
+static void R_StudioSetColorBegin( short *ptricmds, vec3_t *pstudionorms )
+{
+	rgba_t color;
+
+	R_StudioSetColorArray( ptricmds, pstudionorms, color );
+	pglColor4ubv( color );
 }
 
 /*
@@ -2812,7 +2769,7 @@ static void R_StudioClientEvents( void )
 	if( pseqdesc->numevents == 0 )
 		return;
 
-	end = R_StudioEstimateFrame( e, pseqdesc );
+	end = R_StudioEstimateFrame( e, pseqdesc, g_studio.time );
 	start = end - e->curstate.framerate * gpGlobals->frametime * pseqdesc->fps;
 	pevent = (mstudioevent_t *)((byte *)m_pStudioHeader + pseqdesc->eventindex);
 
@@ -3800,7 +3757,7 @@ static void R_StudioLoadTexture( model_t *mod, studiohdr_t *phdr, mstudiotexture
 	}
 
 	Q_strncpy( mdlname, mod->name, sizeof( mdlname ));
-	COM_FileBase( ptexture->name, name );
+	COM_FileBase( ptexture->name, name, sizeof( name ));
 	COM_StripExtension( mdlname );
 
 	if( FBitSet( ptexture->flags, STUDIO_NF_NOMIPS ))

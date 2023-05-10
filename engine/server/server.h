@@ -328,7 +328,6 @@ typedef struct
 	qboolean	msg_trace;		// trace this message
 
 	void		*hInstance;		// pointer to game.dll
-	qboolean		config_executed;		// should to execute config.cfg once time to restore FCVAR_ARCHIVE that specified in hl.dll
 
 	edict_t		*edicts;			// solid array of server entities
 	int		numEntities;		// actual entities count
@@ -375,7 +374,6 @@ typedef struct
 	entity_state_t	*baselines;		// [GI->max_edicts]
 	entity_state_t	*static_entities;		// [MAX_STATIC_ENTITIES];
 
-	double		last_heartbeat;
 	challenge_t	challenges[MAX_CHALLENGES];	// to prevent invalid IPs from connecting
 } server_static_t;
 
@@ -394,7 +392,7 @@ extern convar_t		sv_unlag;
 extern convar_t		sv_maxunlag;
 extern convar_t		sv_unlagpush;
 extern convar_t		sv_unlagsamples;
-extern convar_t		rcon_password;
+extern convar_t		rcon_enable;
 extern convar_t		sv_instancedbaseline;
 extern convar_t		sv_background_freeze;
 extern convar_t		sv_minupdaterate;
@@ -437,10 +435,14 @@ extern convar_t		sv_uploadmax;
 extern convar_t		sv_trace_messages;
 extern convar_t		sv_enttools_enable;
 extern convar_t		sv_enttools_maxfire;
+extern convar_t		sv_autosave;
 extern convar_t		deathmatch;
 extern convar_t		hostname;
 extern convar_t		skill;
 extern convar_t		coop;
+extern convar_t		sv_cheats;
+extern convar_t		public_server;
+extern convar_t		sv_nat;
 
 extern	convar_t		*sv_pausable;		// allows pause in multiplayer
 extern	convar_t		*sv_check_errors;
@@ -449,7 +451,6 @@ extern	convar_t		*sv_lighting_modulate;
 extern	convar_t		*sv_novis;
 extern	convar_t		*sv_hostmap;
 extern	convar_t		*sv_validate_changelevel;
-extern	convar_t		*public_server;
 
 //===========================================================
 //
@@ -477,9 +478,6 @@ qboolean SV_ProcessUserAgent( netadr_t from, const char *useragent );
 void Host_SetServerState( int state );
 qboolean SV_IsSimulating( void );
 void SV_FreeClients( void );
-void Master_Add( void );
-void Master_Heartbeat( void );
-void Master_Packet( void );
 
 //
 // sv_init.c
@@ -589,7 +587,6 @@ void SV_InactivateClients( void );
 int SV_FindBestBaselineForStatic( int index, entity_state_t **baseline, entity_state_t *to );
 void SV_WriteFrameToClient( sv_client_t *client, sizebuf_t *msg );
 void SV_BuildClientFrame( sv_client_t *client );
-void SV_SendMessagesToAll( void );
 void SV_SkipUpdates( void );
 
 //
@@ -661,7 +658,7 @@ void SV_SetLogAddress_f( void );
 //
 // sv_save.c
 //
-void SV_SaveGame( const char *pName );
+qboolean SV_SaveGame( const char *pName );
 qboolean SV_LoadGame( const char *pName );
 int SV_LoadGameState( char const *level );
 void SV_ChangeLevel( qboolean loadfromsavedgame, const char *mapname, const char *start, qboolean background );
@@ -698,6 +695,5 @@ void SV_RunLightStyles( void );
 void SV_SetLightStyle( int style, const char* s, float f );
 const char *SV_GetLightStyle( int style );
 int SV_LightForEntity( edict_t *pEdict );
-void SV_ClearPhysEnts( void );
 
 #endif//SERVER_H

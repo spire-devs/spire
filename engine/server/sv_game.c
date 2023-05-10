@@ -849,6 +849,7 @@ void SV_WriteEntityPatch( const char *filename )
 	byte		buf[MAX_TOKEN]; // 1 kb
 	string		bspfilename;
 	dheader_t		*header;
+	dlump_t entities;
 	file_t		*f;
 
 	Q_snprintf( bspfilename, sizeof( bspfilename ), "maps/%s.bsp", filename );
@@ -861,14 +862,14 @@ void SV_WriteEntityPatch( const char *filename )
 	header = (dheader_t *)buf;
 
 	// check all the lumps and some other errors
-	if( !Mod_TestBmodelLumps( bspfilename, buf, true ))
+	if( !Mod_TestBmodelLumps( f, bspfilename, buf, true, &entities ))
 	{
 		FS_Close( f );
 		return;
 	}
 
-	lumpofs = header->lumps[LUMP_ENTITIES].fileofs;
-	lumplen = header->lumps[LUMP_ENTITIES].filelen;
+	lumpofs = entities.fileofs;
+	lumplen = entities.filelen;
 
 	if( lumplen >= 10 )
 	{
@@ -899,6 +900,7 @@ static char *SV_ReadEntityScript( const char *filename, int *flags )
 	byte		buf[MAX_TOKEN];
 	char		*ents = NULL;
 	dheader_t		*header;
+	dlump_t entities;
 	size_t		ft1, ft2;
 	file_t		*f;
 
@@ -915,7 +917,7 @@ static char *SV_ReadEntityScript( const char *filename, int *flags )
 	header = (dheader_t *)buf;
 
 	// check all the lumps and some other errors
-	if( !Mod_TestBmodelLumps( bspfilename, buf, (host_developer.value) ? false : true ))
+	if( !Mod_TestBmodelLumps( f, bspfilename, buf, (host_developer.value) ? false : true, &entities ))
 	{
 		SetBits( *flags, MAP_INVALID_VERSION );
 		FS_Close( f );
@@ -923,8 +925,8 @@ static char *SV_ReadEntityScript( const char *filename, int *flags )
 	}
 
 	// after call Mod_TestBmodelLumps we gurantee what map is valid
-	lumpofs = header->lumps[LUMP_ENTITIES].fileofs;
-	lumplen = header->lumps[LUMP_ENTITIES].filelen;
+	lumpofs = entities.fileofs;
+	lumplen = entities.filelen;
 
 	// check for entfile too
 	Q_snprintf( entfilename, sizeof( entfilename ), "maps/%s.ent", filename );
@@ -2085,18 +2087,21 @@ int SV_BuildSoundMsg( sizebuf_t *msg, edict_t *ent, int chan, const char *sample
 	}
 	else
 	{
-		// TESTTEST
-		if( *sample == '*' ) chan = CHAN_AUTO;
+		// '*' is special symbol to handle stream sounds
+		// (CHAN_VOICE but cannot be overriden)
+		// originally handled on client side
+		if( *sample == '*' )
+			chan = CHAN_STREAM;
 
 		// precache_sound can be used twice: cache sounds when loading
 		// and return sound index when server is active
 		sound_idx = SV_SoundIndex( sample );
-	}
 
-	if( !sound_idx )
-	{
-		Con_Printf( S_ERROR "SV_StartSound: %s not precached (%d)\n", sample, sound_idx );
-		return 0;
+		if( !sound_idx )
+		{
+			Con_Printf( S_ERROR "SV_StartSound: %s not precached (%d)\n", sample, sound_idx );
+			return 0;
+		}
 	}
 
 	spawn = FBitSet( flags, SND_RESTORE_POSITION ) ? false : true;
@@ -2203,7 +2208,7 @@ SV_StartMusic
 void SV_StartMusic( const char *curtrack, const char *looptrack, int position )
 {
 	MSG_BeginServerCmd( &sv.multicast, svc_stufftext );
-	MSG_WriteString( &sv.multicast, va( "music \"%s\" \"%s\" %d\n", curtrack, looptrack, position ));
+	MSG_WriteStringf( &sv.multicast, "music \"%s\" \"%s\" %d\n", curtrack, looptrack, position );
 	SV_Multicast( MSG_ALL, NULL, NULL, false, false );
 }
 
@@ -2450,21 +2455,6 @@ pfnServerExecute
 void GAME_EXPORT pfnServerExecute( void )
 {
 	Cbuf_Execute();
-
-	if( svgame.config_executed )
-		return;
-
-	// here we restore arhcived cvars only from game.dll
-	host.apply_game_config = true;
-	Cbuf_AddText( "exec config.cfg\n" );
-	Cbuf_Execute();
-
-	if( host.sv_cvars_restored > 0 )
-		Con_Reportf( "server executing ^2config.cfg^7 (%i cvars)\n", host.sv_cvars_restored );
-
-	host.apply_game_config = false;
-	svgame.config_executed = true;
-	host.sv_cvars_restored = 0;
 }
 
 /*
@@ -2652,6 +2642,7 @@ void GAME_EXPORT pfnMessageEnd( void )
 {
 	const char	*name = "Unknown";
 	float		*org = NULL;
+	word realsize;
 
 	if( svgame.msg_name ) name = svgame.msg_name;
 	if( !svgame.msg_started ) Host_Error( "MessageEnd: called with no active message\n" );
@@ -2683,7 +2674,8 @@ void GAME_EXPORT pfnMessageEnd( void )
 				return;
 			}
 
-			*(word *)&sv.multicast.pData[svgame.msg_size_index] = svgame.msg_realsize;
+			realsize = svgame.msg_realsize;
+			memcpy( &sv.multicast.pData[svgame.msg_size_index], &realsize, sizeof( realsize ));
 		}
 	}
 	else if( svgame.msg[svgame.msg_index].size != -1 )
@@ -2715,7 +2707,8 @@ void GAME_EXPORT pfnMessageEnd( void )
 			return;
 		}
 
-		*(word *)&sv.multicast.pData[svgame.msg_size_index] = svgame.msg_realsize;
+		realsize = svgame.msg_realsize;
+		memcpy( &sv.multicast.pData[svgame.msg_size_index], &realsize, sizeof( realsize ));
 	}
 	else
 	{
@@ -3095,7 +3088,7 @@ void SV_SetStringArrayMode( qboolean dynamic )
 #endif
 }
 
-#if XASH_64BIT && !XASH_WIN32 && !XASH_APPLE
+#if XASH_64BIT && !XASH_WIN32 && !XASH_APPLE && !XASH_NSWITCH
 #define USE_MMAP
 #include <sys/mman.h>
 #endif
@@ -3772,7 +3765,7 @@ void GAME_EXPORT pfnSetClientMaxspeed( const edict_t *pEdict, float fNewMaxspeed
 		return;
 
 	fNewMaxspeed = bound( -svgame.movevars.maxspeed, fNewMaxspeed, svgame.movevars.maxspeed );
-	Info_SetValueForKey( cl->physinfo, "maxspd", va( "%.f", fNewMaxspeed ), MAX_INFO_STRING );
+	Info_SetValueForKeyf( cl->physinfo, "maxspd", MAX_INFO_STRING, "%.f", fNewMaxspeed );
 	cl->edict->v.maxspeed = fNewMaxspeed;
 }
 
@@ -4893,7 +4886,12 @@ qboolean SV_ParseEdict( char **pfile, edict_t *ent )
 			pkvd[i].szKeyName = copystring( "angles" );
 
 			if( flYawAngle >= 0.0f )
-				pkvd[i].szValue = copystring( va( "%g %g %g", ent->v.angles[0], flYawAngle, ent->v.angles[2] ));
+			{
+				char temp[MAX_VA_STRING];
+
+				Q_snprintf( temp, sizeof( temp ), "%g %g %g", ent->v.angles[0], flYawAngle, ent->v.angles[2] );
+				pkvd[i].szValue = copystring( temp );
+			}
 			else if( flYawAngle == -1.0f )
 				pkvd[i].szValue = copystring( "-90 0 0" );
 			else if( flYawAngle == -2.0f )
@@ -4904,11 +4902,14 @@ qboolean SV_ParseEdict( char **pfile, edict_t *ent )
 #ifdef HACKS_RELATED_HLMODS
 		if( adjust_origin && !Q_strcmp( pkvd[i].szKeyName, "origin" ))
 		{
+			char temp[MAX_VA_STRING];
 			char	*pstart = pkvd[i].szValue;
 
 			COM_ParseVector( &pstart, origin, 3 );
 			Mem_Free( pkvd[i].szValue );	// release old value, so we don't need these
-			pkvd[i].szValue = copystring( va( "%g %g %g", origin[0], origin[1], origin[2] - 16.0f ));
+
+			Q_snprintf( temp, sizeof( temp ), "%g %g %g", origin[0], origin[1], origin[2] - 16.0f );
+			pkvd[i].szValue = copystring( temp );
 		}
 #endif
 		if( !Q_strcmp( pkvd[i].szKeyName, "light" ))

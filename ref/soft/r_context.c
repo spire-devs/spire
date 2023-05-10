@@ -26,23 +26,6 @@ static void GAME_EXPORT R_ClearScreen( void )
 
 }
 
-static qboolean GAME_EXPORT IsNormalPass( void )
-{
-	return RP_NORMALPASS();
-}
-
-static void GAME_EXPORT R_IncrementSpeedsCounter( int type )
-{
-	switch( type )
-	{
-	case RS_ACTIVE_TENTS:
-		r_stats.c_active_tents_count++;
-		break;
-	default:
-		gEngfuncs.Host_Error( "R_IncrementSpeedsCounter: unsupported type %d\n", type );
-	}
-}
-
 static const byte * GAME_EXPORT R_GetTextureOriginalBuffer( unsigned int idx )
 {
 	image_t *glt = R_GetTexture( idx );
@@ -341,11 +324,6 @@ void GAME_EXPORT R_SetupSky(const char *skyboxname)
 
 }
 
-qboolean GAME_EXPORT VID_ScreenShot(const char *filename, int shot_type)
-{
-	return false;
-}
-
 qboolean GAME_EXPORT VID_CubemapShot(const char *base, uint size, const float *vieworg, qboolean skyshot)
 {
 	// cubemaps? in my softrender???
@@ -586,9 +564,4 @@ int EXPORT GAME_EXPORT GetRefAPI( int version, ref_interface_t *funcs, ref_api_t
 	gpGlobals = globals;
 
 	return REF_API_VERSION;
-}
-
-void EXPORT GetRefHumanReadableName( char *out, size_t size )
-{
-	Q_strncpy( out, "Software", size );
 }

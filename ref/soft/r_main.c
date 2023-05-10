@@ -451,7 +451,7 @@ void R_SetupFrustum( void )
 #if 1
 	//ref_overview_t	*ov = gEngfuncs.GetOverviewParms();
 
-	/*if( RP_NORMALPASS() && ( ENGINE_GET_PARM( PARM_WATER_LEVEL ) >= 3 ))
+	/*if( RP_NORMALPASS() && ( ENGINE_GET_PARM( PARM_WATER_LEVEL ) >= 3 ) && ENGINE_GET_PARM( PARM_QUAKE_COMPATIBLE ))
 	{
 		RI.fov_x = atan( tan( DEG2RAD( RI.fov_x ) / 2 ) * ( 0.97 + sin( gpGlobals->time * 1.5 ) * 0.03 )) * 2 / (M_PI / 180.0);
 		RI.fov_y = atan( tan( DEG2RAD( RI.fov_y ) / 2 ) * ( 1.03 - sin( gpGlobals->time * 1.5 ) * 0.03 )) * 2 / (M_PI / 180.0);
@@ -1311,7 +1311,7 @@ void R_DrawBrushModel(cl_entity_t *pent)
 		if (!topnode)
 			return;	// no part in a visible leaf
 
-			alphaspans = true;
+		alphaspans = true;
 		VectorCopy (RI.currententity->origin, r_entorigin);
 		VectorSubtract (RI.vieworg, r_entorigin, tr.modelorg);
 		//VectorSubtract (r_origin, RI.currententity->origin, modelorg);
@@ -1971,6 +1971,7 @@ qboolean GAME_EXPORT R_Init( void )
 	R_StudioInit();
 	R_SpriteInit();
 	R_InitTurb();
+	GL_InitRandomTable();
 
 	return true;
 }

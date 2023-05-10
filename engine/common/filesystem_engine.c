@@ -1,6 +1,9 @@
  /*
 filesystem.c - game filesystem based on DP fs
+Copyright (C) 2003-2006 Mathieu Olivier
+Copyright (C) 2000-2007 DarkPlaces contributors
 Copyright (C) 2007 Uncle Mike
+Copyright (C) 2015-2023 Xash3D FWGS contributors
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -52,8 +55,11 @@ static fs_interface_t fs_memfuncs =
 
 static void FS_UnloadProgs( void )
 {
-	COM_FreeLibrary( fs_hInstance );
-	fs_hInstance = 0;
+	if( fs_hInstance )
+	{
+		COM_FreeLibrary( fs_hInstance );
+		fs_hInstance = 0;
+	}
 }
 
 #ifdef XASH_INTERNAL_GAMELIBS
@@ -101,25 +107,16 @@ FS_Init
 */
 void FS_Init( void )
 {
-	qboolean		hasBaseDir = false;
-	qboolean		hasGameDir = false;
-	qboolean		caseinsensitive = true;
-	int		i;
 	string gamedir;
 
 	Cmd_AddRestrictedCommand( "fs_rescan", FS_Rescan_f, "rescan filesystem search pathes" );
 	Cmd_AddRestrictedCommand( "fs_path", FS_Path_f_, "show filesystem search pathes" );
 	Cmd_AddRestrictedCommand( "fs_clearpaths", FS_ClearPaths_f, "clear filesystem search pathes" );
 
-#if !XASH_WIN32
-	if( Sys_CheckParm( "-casesensitive" ) )
-		caseinsensitive = false;
-#endif
-
 	if( !Sys_GetParmFromCmdLine( "-game", gamedir ))
 		Q_strncpy( gamedir, SI.basedirName, sizeof( gamedir )); // gamedir == basedir
 
-	if( !FS_InitStdio( caseinsensitive, host.rootdir, SI.basedirName, gamedir, host.rodir ))
+	if( !FS_InitStdio( true, host.rootdir, SI.basedirName, gamedir, host.rodir ))
 	{
 		Host_Error( "Can't init filesystem_stdio!\n" );
 		return;
@@ -139,9 +136,8 @@ FS_Shutdown
 */
 void FS_Shutdown( void )
 {
-	int	i;
-
-	FS_ShutdownStdio();
+	if( g_fsapi.ShutdownStdio )
+		g_fsapi.ShutdownStdio();
 
 	memset( &SI, 0, sizeof( sysinfo_t ));
 

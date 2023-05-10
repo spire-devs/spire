@@ -122,8 +122,11 @@ Platform_Vibrate
 */
 void Platform_Vibrate( float time, char flags )
 {
-	// stub
+	if( g_joy )
+		SDL_JoystickRumble( g_joy, 0xFFFF, 0xFFFF, time * 1000.0f );
 }
+
+#if !XASH_PSVITA
 
 /*
 =============
@@ -137,6 +140,8 @@ void Platform_EnableTextInput( qboolean enable )
 	enable ? SDL_StartTextInput() : SDL_StopTextInput();
 #endif // SDL_VERSION_ATLEAST( 2, 0, 0 )
 }
+
+#endif // !XASH_PSVITA
 
 /*
 =============
@@ -342,12 +347,10 @@ void Platform_SetCursorType( VGUI_DefaultCursor type )
 	{
 		SDL_SetCursor( cursors.cursors[type] );
 		SDL_ShowCursor( true );
-		Key_EnableTextInput( true, false );
 	}
 	else
 	{
 		SDL_ShowCursor( false );
-		Key_EnableTextInput( false, false );
 	}
 #else
 	if( host.mouse_visible )

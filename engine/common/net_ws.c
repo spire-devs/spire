@@ -25,6 +25,10 @@ GNU General Public License for more details.
 #else
 #include "platform/posix/net.h"
 #endif
+#if XASH_PSVITA
+#include "platform/psvita/net_psvita.h"
+static const struct in6_addr in6addr_any;
+#endif
 
 #define NET_USE_FRAGMENTS
 
@@ -186,6 +190,19 @@ char *NET_ErrorString( void )
 #else
 	return strerror( errno );
 #endif
+}
+
+_inline socklen_t NET_SockAddrLen( const struct sockaddr_storage *addr )
+{
+	switch ( addr->ss_family )
+	{
+	case AF_INET:
+		return sizeof( struct sockaddr_in );
+	case AF_INET6:
+		return sizeof( struct sockaddr_in6 );
+	default:
+		return sizeof( *addr ); // what the fuck is this?
+	}
 }
 
 _inline qboolean NET_IsSocketError( int retval )
@@ -356,9 +373,9 @@ qboolean NET_GetHostByName( const char *hostname, int family, struct sockaddr_st
 #endif
 }
 
-#if !defined XASH_NO_ASYNC_NS_RESOLVE && ( XASH_WIN32 || !( XASH_EMSCRIPTEN || XASH_DOS4GW ))
+#if !XASH_EMSCRIPTEN && !XASH_DOS4GW && !defined XASH_NO_ASYNC_NS_RESOLVE
 #define CAN_ASYNC_NS_RESOLVE
-#endif
+#endif // !XASH_EMSCRIPTEN && !XASH_DOS4GW && !defined XASH_NO_ASYNC_NS_RESOLVE
 
 #ifdef CAN_ASYNC_NS_RESOLVE
 static void NET_ResolveThread( void );
@@ -381,13 +398,13 @@ void *NET_ThreadStart( void *unused )
 #define mutex_lock EnterCriticalSection
 #define mutex_unlock LeaveCriticalSection
 #define detach_thread( x ) CloseHandle(x)
-#define create_thread( pfn ) nsthread.thread = CreateThread( NULL, 0, pfn, NULL, 0, NULL )
+#define create_thread( pfn ) ( nsthread.thread = CreateThread( NULL, 0, pfn, NULL, 0, NULL ))
 #define mutex_t  CRITICAL_SECTION
 #define thread_t HANDLE
 DWORD WINAPI NET_ThreadStart( LPVOID unused )
 {
 	NET_ResolveThread();
-	ExitThread(0);
+	ExitThread( 0 );
 	return 0;
 }
 #endif // !_WIN32
@@ -414,14 +431,14 @@ static struct nsthread_s
 #endif
 ;
 
-#if XASH_WIN32
 static void NET_InitializeCriticalSections( void )
 {
 	net.threads_initialized = true;
-	pInitializeCriticalSection( &nsthread.mutexns );
-	pInitializeCriticalSection( &nsthread.mutexres );
-}
+#if XASH_WIN32
+	InitializeCriticalSection( &nsthread.mutexns );
+	InitializeCriticalSection( &nsthread.mutexres );
 #endif
+}
 
 void NET_ResolveThread( void )
 {
@@ -460,7 +477,7 @@ idnewt:28000
 192.246.40.70:28000
 =============
 */
-static int NET_StringToSockaddr( const char *s, struct sockaddr_storage *sadr, qboolean nonblocking, int family )
+static net_gai_state_t NET_StringToSockaddr( const char *s, struct sockaddr_storage *sadr, qboolean nonblocking, int family )
 {
 	int ret = 0, port;
 	char	*colon;
@@ -469,7 +486,7 @@ static int NET_StringToSockaddr( const char *s, struct sockaddr_storage *sadr, q
 	struct sockaddr_storage temp;
 
 	if( !net.initialized )
-		return false;
+		return NET_EAI_NONAME;
 
 	memset( sadr, 0, sizeof( *sadr ));
 
@@ -480,7 +497,7 @@ static int NET_StringToSockaddr( const char *s, struct sockaddr_storage *sadr, q
 		((struct sockaddr_in6 *)sadr)->sin6_port = htons((short)port);
 		memcpy(((struct sockaddr_in6 *)sadr)->sin6_addr.s6_addr, ip6, sizeof( struct in6_addr ));
 
-		return true;
+		return NET_EAI_OK;
 	}
 
 	Q_strncpy( copy, s, sizeof( copy ));
@@ -513,14 +530,14 @@ static int NET_StringToSockaddr( const char *s, struct sockaddr_storage *sadr, q
 			if( nsthread.busy )
 			{
 				mutex_unlock( &nsthread.mutexres );
-				return 2;
+				return NET_EAI_AGAIN;
 			}
 
 			if( !Q_strcmp( copy, nsthread.hostname ))
 			{
 				ret = nsthread.result;
 
-				nsthread.hostname[0] = 0;
+				nsthread.hostname[0] = '\0';
 				nsthread.family = AF_UNSPEC;
 				temp = nsthread.addr;
 				memset( &nsthread.addr, 0, sizeof( nsthread.addr ));
@@ -537,11 +554,11 @@ static int NET_StringToSockaddr( const char *s, struct sockaddr_storage *sadr, q
 				if( create_thread( NET_ThreadStart ))
 				{
 					asyncfailed = false;
-					return 2;
+					return NET_EAI_AGAIN;
 				}
 				else // failed to create thread
 				{
-					Con_Reportf( S_ERROR  "NET_StringToSockaddr: failed to create thread!\n");
+					Con_Reportf( S_ERROR "NET_StringToSockaddr: failed to create thread!\n");
 					nsthread.busy = false;
 				}
 			}
@@ -560,7 +577,8 @@ static int NET_StringToSockaddr( const char *s, struct sockaddr_storage *sadr, q
 			if( family == AF_INET6 )
 				sadr->ss_family = AF_INET6;
 			else sadr->ss_family = AF_INET;
-			return 0;
+
+			return NET_EAI_NONAME;
 		}
 
 		sadr->ss_family = temp.ss_family;
@@ -578,7 +596,7 @@ static int NET_StringToSockaddr( const char *s, struct sockaddr_storage *sadr, q
 		}
 	}
 
-	return 1;
+	return NET_EAI_OK;
 }
 
 /*
@@ -700,20 +718,24 @@ NET_AdrToString
 */
 const char *NET_AdrToString( const netadr_t a )
 {
+	static char s[64];
+
 	if( a.type == NA_LOOPBACK )
 		return "loopback";
 	if( a.type6 == NA_IP6 )
 	{
-		char s[64];
 		uint8_t ip6[16];
 
 		NET_NetadrToIP6Bytes( ip6, &a );
 		IPv6AddrToString( s, ip6, ntohs( a.port ), 0 );
 
-		return va( "%s", s );
+		return s;
 	}
 
-	return va( "%i.%i.%i.%i:%i", a.ip[0], a.ip[1], a.ip[2], a.ip[3], ntohs( a.port ));
+	Q_snprintf( s, sizeof( s ),
+		"%i.%i.%i.%i:%i", a.ip[0], a.ip[1], a.ip[2], a.ip[3], ntohs( a.port ));
+
+	return s;
 }
 
 /*
@@ -723,19 +745,24 @@ NET_BaseAdrToString
 */
 const char *NET_BaseAdrToString( const netadr_t a )
 {
+	static char s[64];
+
 	if( a.type == NA_LOOPBACK )
 		return "loopback";
 	if( a.type6 == NA_IP6 )
 	{
-		char s[64];
 		uint8_t ip6[16];
 
 		NET_NetadrToIP6Bytes( ip6, &a );
 		IPv6IPToString( s, ip6 );
 
-		return va( "%s", s );
+		return s;
 	}
-	return va( "%i.%i.%i.%i", a.ip[0], a.ip[1], a.ip[2], a.ip[3] );
+
+	Q_snprintf( s, sizeof( s ),
+		"%i.%i.%i.%i", a.ip[0], a.ip[1], a.ip[2], a.ip[3] );
+
+	return s;
 }
 
 /*
@@ -924,9 +951,67 @@ qboolean NET_CompareAdr( const netadr_t a, const netadr_t b )
 		    return true;
 	}
 
-
 	Con_DPrintf( S_ERROR "NET_CompareAdr: bad address type\n" );
 	return false;
+}
+
+/*
+====================
+NET_CompareAdrSort
+
+Network address sorting comparator
+guaranteed to return -1, 0 or 1
+====================
+*/
+int NET_CompareAdrSort( const void *_a, const void *_b )
+{
+	const netadr_t *a = _a, *b = _b;
+	int porta, portb, portdiff, addrdiff;
+
+	if( a->type6 != b->type6 )
+		return bound( -1, (int)a->type6 - (int)b->type6, 1 );
+
+	porta = ntohs( a->port );
+	portb = ntohs( b->port );
+	if( porta < portb )
+		portdiff = -1;
+	else if( porta > portb )
+		portdiff = 1;
+	else
+		portdiff = 0;
+
+	switch( a->type6 )
+	{
+	case NA_IP6:
+		if(( addrdiff = NET_NetadrIP6Compare( a, b )))
+			return addrdiff;
+		// fallthrough
+	case NA_MULTICAST_IP6:
+		return portdiff;
+	}
+
+	// don't check for full type earlier, as it's value depends on v6 address
+	if( a->type != b->type )
+		return bound( -1, (int)a->type - (int)b->type, 1 );
+
+	switch( a->type )
+	{
+	case NA_IP:
+		if(( addrdiff = memcmp( a->ip, b->ip, sizeof( a->ipx ))))
+			return addrdiff;
+		// fallthrough
+	case NA_BROADCAST:
+		return portdiff;
+
+	case NA_IPX:
+		if(( addrdiff = memcmp( a->ipx, b->ipx, sizeof( a->ipx ))))
+			return addrdiff;
+		// fallthrough
+	case NA_BROADCAST_IPX:
+		return portdiff;
+	}
+
+	return 0;
 }
 
 /*
@@ -959,10 +1044,9 @@ qboolean NET_StringToAdrEx( const char *string, netadr_t *adr, int family )
 		return true;
 	}
 
-	if( !NET_StringToSockaddr( string, &s, false, family ))
+	if( NET_StringToSockaddr( string, &s, false, family ) != NET_EAI_OK )
 		return false;
 	NET_SockadrToNetadr( &s, adr );
-
 	return true;
 }
 
@@ -972,13 +1056,13 @@ qboolean NET_StringToAdr( const char *string, netadr_t *adr )
 	return NET_StringToAdrEx( string, adr, AF_UNSPEC );
 }
 
-int NET_StringToAdrNB( const char *string, netadr_t *adr )
+net_gai_state_t NET_StringToAdrNB( const char *string, netadr_t *adr )
 {
 	struct sockaddr_storage s;
-	int res;
+	net_gai_state_t res;
 
 	memset( adr, 0, sizeof( netadr_t ));
-	if( !Q_stricmp( string, "localhost" )  || !Q_stricmp( string, "loopback" ))
+	if( !Q_stricmp( string, "localhost" ) || !Q_stricmp( string, "loopback" ))
 	{
 		adr->type = NA_LOOPBACK;
 		return true;
@@ -986,12 +1070,10 @@ int NET_StringToAdrNB( const char *string, netadr_t *adr )
 
 	res = NET_StringToSockaddr( string, &s, true, AF_UNSPEC );
 
-	if( res == 0 || res == 2 )
-		return res;
+	if( res == NET_EAI_OK )
+		NET_SockadrToNetadr( &s, adr );
 
-	NET_SockadrToNetadr( &s, adr );
-
-	return true;
+	return res;
 }
 
 /*
@@ -1368,7 +1450,7 @@ static qboolean NET_QueuePacket( netsrc_t sock, netadr_t *from, byte *data, size
 	int		ret, protocol;
 	int		net_socket;
 	WSAsize_t	addr_len;
-	struct sockaddr_storage	addr;
+	struct sockaddr_storage	addr = { 0 };
 
 	*length = 0;
 
@@ -1534,7 +1616,7 @@ NET_SendPacketEx
 void NET_SendPacketEx( netsrc_t sock, size_t length, const void *data, netadr_t to, size_t splitsize )
 {
 	int		ret;
-	struct sockaddr_storage	addr;
+	struct sockaddr_storage	addr = { 0 };
 	SOCKET		net_socket = 0;
 
 	if( !net.initialized || to.type == NA_LOOPBACK )
@@ -1561,7 +1643,7 @@ void NET_SendPacketEx( netsrc_t sock, size_t length, const void *data, netadr_t 
 
 	NET_NetadrToSockadr( &to, &addr );
 
-	ret = NET_SendLong( sock, net_socket, data, length, 0, &addr, sizeof( addr ), splitsize );
+	ret = NET_SendLong( sock, net_socket, data, length, 0, &addr, NET_SockAddrLen( &addr ), splitsize );
 
 	if( NET_IsSocketError( ret ))
 	{
@@ -1603,83 +1685,19 @@ void NET_SendPacket( netsrc_t sock, size_t length, const void *data, netadr_t to
 
 /*
 ====================
-NET_BufferToBufferCompress
-
-generic fast compression
-====================
-*/
-qboolean NET_BufferToBufferCompress( byte *dest, uint *destLen, byte *source, uint sourceLen )
-{
-	uint	uCompressedLen = 0;
-	byte	*pbOut = NULL;
-
-	memcpy( dest, source, sourceLen );
-	pbOut = LZSS_Compress( source, sourceLen, &uCompressedLen );
-
-	if( pbOut && uCompressedLen > 0 && uCompressedLen <= *destLen )
-	{
-		memcpy( dest, pbOut, uCompressedLen );
-		*destLen = uCompressedLen;
-		free( pbOut );
-		return true;
-	}
-	else
-	{
-		if( pbOut ) free( pbOut );
-		memcpy( dest, source, sourceLen );
-		*destLen = sourceLen;
-		return false;
-	}
-}
-
-/*
-====================
-NET_BufferToBufferDecompress
-
-generic fast decompression
-====================
-*/
-qboolean NET_BufferToBufferDecompress( byte *dest, uint *destLen, byte *source, uint sourceLen )
-{
-	if( LZSS_IsCompressed( source ))
-	{
-		uint	uDecompressedLen = LZSS_GetActualSize( source );
-
-		if( uDecompressedLen <= *destLen )
-		{
-			*destLen = LZSS_Decompress( source, dest );
-		}
-		else
-		{
-			return false;
-		}
-	}
-	else
-	{
-		memcpy( dest, source, sourceLen );
-		*destLen = sourceLen;
-	}
-
-	return true;
-}
-
-/*
-====================
 NET_IPSocket
 ====================
 */
 static int NET_IPSocket( const char *net_iface, int port, int family )
 {
-	struct sockaddr_storage	addr;
+	struct sockaddr_storage	addr = { 0 };
 	int		err, net_socket;
 	uint		optval = 1;
 	dword		_true = 1;
-	int pfamily;
+	int pfamily = PF_INET;
 
 	if( family == AF_INET6 )
 		pfamily = PF_INET6;
-	else if( family == AF_INET )
-		pfamily = PF_INET;
 
 	if( NET_IsSocketError(( net_socket = socket( pfamily, SOCK_DGRAM, IPPROTO_UDP ))))
 	{
@@ -1736,7 +1754,7 @@ static int NET_IPSocket( const char *net_iface, int port, int family )
 		if( port == PORT_ANY ) ((struct sockaddr_in6 *)&addr)->sin6_port = 0;
 		else ((struct sockaddr_in6 *)&addr)->sin6_port = htons((short)port);
 
-		if( NET_IsSocketError( bind( net_socket, (struct sockaddr *)&addr, sizeof( addr ))))
+		if( NET_IsSocketError( bind( net_socket, (struct sockaddr *)&addr, sizeof( struct sockaddr_in6 ))))
 		{
 			Con_DPrintf( S_WARN "NET_UDPSocket: port: %d bind6: %s\n", port, NET_ErrorString( ));
 			closesocket( net_socket );
@@ -1773,7 +1791,7 @@ static int NET_IPSocket( const char *net_iface, int port, int family )
 		if( port == PORT_ANY ) ((struct sockaddr_in *)&addr)->sin_port = 0;
 		else ((struct sockaddr_in *)&addr)->sin_port = htons((short)port);
 
-		if( NET_IsSocketError( bind( net_socket, (struct sockaddr *)&addr, sizeof( addr ))))
+		if( NET_IsSocketError( bind( net_socket, (struct sockaddr *)&addr, sizeof( struct sockaddr_in ))))
 		{
 			Con_DPrintf( S_WARN "NET_UDPSocket: port: %d bind: %s\n", port, NET_ErrorString( ));
 			closesocket( net_socket );
@@ -1807,13 +1825,10 @@ static void NET_OpenIP( qboolean change_port, int *sockets, const char *net_ifac
 
 	if( !NET_IsSocketValid( sockets[NS_SERVER] ))
 	{
-		port = net_iphostport->value;
+		port = hostport;
 		if( !port )
 		{
-			if( sv_nat )
-				port = PORT_ANY;
-			else
-				port = net_hostport->value;
+			port = sv_nat ? PORT_ANY : net_hostport->value;
 
 			if( !port )
 				port = PORT_SERVER; // forcing to default
@@ -1821,7 +1836,7 @@ static void NET_OpenIP( qboolean change_port, int *sockets, const char *net_ifac
 		sockets[NS_SERVER] = NET_IPSocket( net_iface, port, family );
 
 		if( !NET_IsSocketValid( sockets[NS_SERVER] ) && Host_IsDedicated( ))
-			Host_Error( "Couldn't allocate dedicated server IP port %d.\n", port );
+			return;
 	}
 
 	// dedicated servers don't need client ports
@@ -1839,13 +1854,10 @@ static void NET_OpenIP( qboolean change_port, int *sockets, const char *net_ifac
 
 	if( !NET_IsSocketValid( sockets[NS_CLIENT] ))
 	{
-		port = net_ipclientport->value;
+		port = clientport;
 		if( !port )
 		{
-			if( cl_nat )
-				port = PORT_ANY;
-			else
-				port = net_clientport->value;
+			port = cl_nat ? PORT_ANY : net_clientport->value;
 
 			if( !port )
 				port = PORT_ANY; // forcing to default
@@ -1855,6 +1867,8 @@ static void NET_OpenIP( qboolean change_port, int *sockets, const char *net_ifac
 		if( !NET_IsSocketValid( sockets[NS_CLIENT] ))
 			sockets[NS_CLIENT] = NET_IPSocket( net_ipname->string, PORT_ANY, family );
 	}
+
+	return;
 }
 
 /*
@@ -1870,6 +1884,7 @@ void NET_GetLocalAddress( void )
 	char		buff[512];
 	struct sockaddr_storage	address;
 	WSAsize_t		namelen;
+	const char		*net_addr_string;
 
 	memset( &net_local, 0, sizeof( netadr_t ));
 	memset( &net6_local, 0, sizeof( netadr_t ));
@@ -1897,8 +1912,9 @@ void NET_GetLocalAddress( void )
 			if( !NET_IsSocketError( getsockname( net.ip_sockets[NS_SERVER], (struct sockaddr *)&address, &namelen )))
 			{
 				net_local.port = ((struct sockaddr_in *)&address)->sin_port;
-				Con_Printf( "Server IPv4 address %s\n", NET_AdrToString( net_local ));
-				Cvar_FullSet( "net_address", va( "%s", NET_AdrToString( net_local )), FCVAR_READ_ONLY );
+				net_addr_string = NET_AdrToString( net_local );
+				Con_Printf( "Server IPv4 address %s\n", net_addr_string );
+				Cvar_FullSet( "net_address", net_addr_string, net_address->flags );
 			}
 			else Con_DPrintf( S_ERROR "Could not get TCP/IPv4 address. Reason: %s\n", NET_ErrorString( ));
 		}
@@ -1919,8 +1935,9 @@ void NET_GetLocalAddress( void )
 			if( !NET_IsSocketError( getsockname( net.ip6_sockets[NS_SERVER], (struct sockaddr *)&address, &namelen )))
 			{
 				net6_local.port = ((struct sockaddr_in6 *)&address)->sin6_port;
-				Con_Printf( "Server IPv6 address %s\n", NET_AdrToString( net6_local ));
-				Cvar_FullSet( "net6_address", va( "%s", NET_AdrToString( net6_local )), FCVAR_READ_ONLY );
+				net_addr_string = NET_AdrToString( net6_local );
+				Con_Printf( "Server IPv6 address %s\n", net_addr_string );
+				Cvar_FullSet( "net6_address", net_addr_string, net6_address->flags );
 			}
 			else Con_DPrintf( S_ERROR "Could not get TCP/IPv6 address. Reason: %s\n", NET_ErrorString( ));
 		}
@@ -1956,6 +1973,21 @@ void NET_Config( qboolean multiplayer, qboolean changeport )
 
 		if( net.allow_ip6 )
 			NET_OpenIP( changeport, net.ip6_sockets, net_ip6name->string, net_ip6hostport->value, net_ip6clientport->value, AF_INET6 );
+
+		// validate sockets for dedicated
+		if( Host_IsDedicated( ))
+		{
+			qboolean nov4, nov6;
+			nov4 = net.allow_ip  && NET_IsSocketError( net.ip_sockets[NS_SERVER] );
+			nov6 = net.allow_ip6 && NET_IsSocketError( net.ip6_sockets[NS_SERVER] );
+
+			if( nov4 && nov6 )
+				Host_Error( "Couldn't allocate IPv4 and IPv6 server ports.\n" );
+			else if( nov4 && !nov6 )
+				Con_Printf( S_ERROR "Couldn't allocate IPv4 server port\n" );
+			else if( !nov4 && nov6 )
+				Con_Printf( S_ERROR "Couldn't allocate IPv6 server_port\n" );
+		}
 
 		// get our local address, if possible
 		if( bFirst )
@@ -2069,20 +2101,20 @@ void NET_Init( void )
 	if( net.initialized ) return;
 
 	net_clockwindow = Cvar_Get( "clockwindow", "0.5", FCVAR_PRIVILEGED, "timewindow to execute client moves" );
-	net_address = Cvar_Get( "net_address", "0", FCVAR_READ_ONLY, "contain local address of current client" );
-	net_ipname = Cvar_Get( "ip", "localhost", 0, "network ip address" );
+	net_address = Cvar_Get( "net_address", "0", FCVAR_PRIVILEGED|FCVAR_READ_ONLY, "contain local address of current client" );
+	net_ipname = Cvar_Get( "ip", "localhost", FCVAR_PRIVILEGED, "network ip address" );
 	net_iphostport = Cvar_Get( "ip_hostport", "0", FCVAR_READ_ONLY, "network ip host port" );
-	net_hostport = Cvar_Get( "hostport", va( "%i", PORT_SERVER ), FCVAR_READ_ONLY, "network default host port" );
+	net_hostport = Cvar_Getf( "hostport", FCVAR_READ_ONLY, "network default host port", "%i", PORT_SERVER );
 	net_ipclientport = Cvar_Get( "ip_clientport", "0", FCVAR_READ_ONLY, "network ip client port" );
-	net_clientport = Cvar_Get( "clientport", va( "%i", PORT_CLIENT ), FCVAR_READ_ONLY, "network default client port" );
+	net_clientport = Cvar_Getf( "clientport", FCVAR_READ_ONLY, "network default client port", "%i", PORT_CLIENT );
 	net_fakelag = Cvar_Get( "fakelag", "0", FCVAR_PRIVILEGED, "lag all incoming network data (including loopback) by xxx ms." );
 	net_fakeloss = Cvar_Get( "fakeloss", "0", FCVAR_PRIVILEGED, "act like we dropped the packet this % of the time." );
 
 	// cvar equivalents for IPv6
-	net_ip6name = Cvar_Get( "ip6", "localhost", FCVAR_READ_ONLY, "network ip6 address" );
+	net_ip6name = Cvar_Get( "ip6", "localhost", FCVAR_PRIVILEGED, "network ip6 address" );
 	net_ip6hostport = Cvar_Get( "ip6_hostport", "0", FCVAR_READ_ONLY, "network ip6 host port" );
 	net_ip6clientport = Cvar_Get( "ip6_clientport", "0", FCVAR_READ_ONLY, "network ip6 client port" );
-	net6_address = Cvar_Get( "net6_address", "0", FCVAR_READ_ONLY, "contain local IPv6 address of current client" );
+	net6_address = Cvar_Get( "net6_address", "0", FCVAR_PRIVILEGED|FCVAR_READ_ONLY, "contain local IPv6 address of current client" );
 
 	// prepare some network data
 	for( i = 0; i < NS_COUNT; i++ )
@@ -2099,9 +2131,10 @@ void NET_Init( void )
 		Con_DPrintf( S_ERROR "network initialization failed.\n" );
 		return;
 	}
-#else
-	// we have pthreads by default
-	net.threads_initialized = true;
+#endif
+
+#ifdef CAN_ASYNC_NS_RESOLVE
+	NET_InitializeCriticalSections();
 #endif
 
 	net.allow_ip = !Sys_CheckParm( "-noip" );
@@ -2117,11 +2150,11 @@ void NET_Init( void )
 
 	// specify custom ip
 	if( Sys_GetParmFromCmdLine( "-ip", cmd ))
-		Cvar_FullSet( "ip", cmd, FCVAR_READ_ONLY );
+		Cvar_FullSet( "ip", cmd, net_ipname->flags );
 
 	// specify custom ip6
 	if( Sys_GetParmFromCmdLine( "-ip6", cmd ))
-		Cvar_FullSet( "ip6", cmd, FCVAR_READ_ONLY );
+		Cvar_FullSet( "ip6", cmd, net_ip6name->flags );
 
 	// adjust clockwindow
 	if( Sys_GetParmFromCmdLine( "-clockwindow", cmd ))
@@ -2483,7 +2516,6 @@ void HTTP_Run( void )
 
 	for( curfile = http.first_file; curfile; curfile = curfile->next )
 	{
-		int res;
 		struct sockaddr_storage addr;
 
 		if( curfile->state == HTTP_FREE )
@@ -2544,18 +2576,23 @@ void HTTP_Run( void )
 
 		if( curfile->state < HTTP_NS_RESOLVED )
 		{
+			net_gai_state_t res;
+			char hostport[MAX_VA_STRING];
+
 			if( fResolving )
 				continue;
 
-			res = NET_StringToSockaddr( va( "%s:%d", curfile->server->host, curfile->server->port ), &addr, true, AF_INET );
+			Q_snprintf( hostport, sizeof( hostport ), "%s:%d", curfile->server->host, curfile->server->port );
 
-			if( res == 2 )
+			res = NET_StringToSockaddr( hostport, &addr, true, AF_INET );
+
+			if( res == NET_EAI_AGAIN )
 			{
 				fResolving = true;
 				continue;
 			}
 
-			if( !res )
+			if( res == NET_EAI_NONAME )
 			{
 				Con_Printf( S_ERROR "failed to resolve server address for %s!\n", curfile->server->host );
 				HTTP_FreeFile( curfile, true ); // Cannot connect
@@ -2566,7 +2603,7 @@ void HTTP_Run( void )
 
 		if( curfile->state < HTTP_CONNECTED ) // Connection not enstabilished
 		{
-			res = connect( curfile->socket, (struct sockaddr*)&addr, sizeof( addr ));
+			int res = connect( curfile->socket, (struct sockaddr*)&addr, NET_SockAddrLen( &addr ) );
 
 			if( res )
 			{
@@ -2585,11 +2622,23 @@ void HTTP_Run( void )
 
 		if( curfile->state < HTTP_REQUEST ) // Request not formatted
 		{
+			string useragent;
+
+			if( !COM_CheckStringEmpty( http_useragent->string ) || !Q_strcmp( http_useragent->string, "xash3d" ))
+			{
+				Q_snprintf( useragent, sizeof( useragent ), "%s/%s (%s-%s; build %d; %s)",
+					XASH_ENGINE_NAME, XASH_VERSION, Q_buildos( ), Q_buildarch( ), Q_buildnum( ), Q_buildcommit( ));
+			}
+			else
+			{
+				Q_strncpy( useragent, http_useragent->string, sizeof( useragent ));
+			}
+
 			curfile->query_length = Q_snprintf( curfile->buf, sizeof( curfile->buf ),
 				"GET %s%s HTTP/1.0\r\n"
 				"Host: %s\r\n"
 				"User-Agent: %s\r\n\r\n", curfile->server->path,
-				curfile->path, curfile->server->host, http_useragent->string );
+				curfile->path, curfile->server->host, useragent );
 			curfile->header_size = 0;
 			curfile->bytes_sent = 0;
 			curfile->state = HTTP_REQUEST;
@@ -2601,8 +2650,7 @@ void HTTP_Run( void )
 
 			while( curfile->bytes_sent < curfile->query_length )
 			{
-				res = send( curfile->socket, curfile->buf + curfile->bytes_sent, curfile->query_length - curfile->bytes_sent, 0 );
-
+				int res = send( curfile->socket, curfile->buf + curfile->bytes_sent, curfile->query_length - curfile->bytes_sent, 0 );
 
 				if( res < 0 )
 				{
@@ -2932,16 +2980,16 @@ void HTTP_Init( void )
 
 	http.first_file = http.last_file = NULL;
 
-	Cmd_AddRestrictedCommand("http_download", &HTTP_Download_f, "add file to download queue");
-	Cmd_AddRestrictedCommand("http_skip", &HTTP_Skip_f, "skip current download server");
-	Cmd_AddRestrictedCommand("http_cancel", &HTTP_Cancel_f, "cancel current download");
-	Cmd_AddRestrictedCommand("http_clear", &HTTP_Clear_f, "cancel all downloads");
-	Cmd_AddCommand("http_list", &HTTP_List_f, "list all queued downloads");
-	Cmd_AddCommand("http_addcustomserver", &HTTP_AddCustomServer_f, "add custom fastdl server");
-	http_useragent = Cvar_Get( "http_useragent", "xash3d", FCVAR_ARCHIVE, "User-Agent string" );
-	http_autoremove = Cvar_Get( "http_autoremove", "1", FCVAR_ARCHIVE, "remove broken files" );
-	http_timeout = Cvar_Get( "http_timeout", "45", FCVAR_ARCHIVE, "timeout for http downloader" );
-	http_maxconnections =  Cvar_Get( "http_maxconnections", "4", FCVAR_ARCHIVE, "maximum http connection number" );
+	Cmd_AddRestrictedCommand( "http_download", HTTP_Download_f, "add file to download queue" );
+	Cmd_AddRestrictedCommand( "http_skip", HTTP_Skip_f, "skip current download server" );
+	Cmd_AddRestrictedCommand( "http_cancel", HTTP_Cancel_f, "cancel current download" );
+	Cmd_AddRestrictedCommand( "http_clear", HTTP_Clear_f, "cancel all downloads" );
+	Cmd_AddRestrictedCommand( "http_list", HTTP_List_f, "list all queued downloads" );
+	Cmd_AddCommand( "http_addcustomserver", HTTP_AddCustomServer_f, "add custom fastdl server");
+	http_useragent = Cvar_Get( "http_useragent", "", FCVAR_ARCHIVE | FCVAR_PRIVILEGED, "User-Agent string" );
+	http_autoremove = Cvar_Get( "http_autoremove", "1", FCVAR_ARCHIVE | FCVAR_PRIVILEGED, "remove broken files" );
+	http_timeout = Cvar_Get( "http_timeout", "45", FCVAR_ARCHIVE | FCVAR_PRIVILEGED, "timeout for http downloader" );
+	http_maxconnections =  Cvar_Get( "http_maxconnections", "4", FCVAR_ARCHIVE | FCVAR_PRIVILEGED, "maximum http connection number" );
 
 	// Read servers from fastdl.txt
 	line = serverfile = (char *)FS_LoadFile( "fastdl.txt", 0, false );
