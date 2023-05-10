@@ -1,0 +1,18 @@
+[submodule "3rdparty/mainui"]
+	path = 3rdparty/mainui
+	url = https://github.com/FWGS/mainui_cpp
+[submodule "3rdparty/nanogl"]
+	path = 3rdparty/nanogl
+	url = https://github.com/FWGS/nanogl
+[submodule "3rdparty/gl-wes-v2"]
+	path = 3rdparty/gl-wes-v2
+	url = https://github.com/FWGS/gl-wes-v2
+[submodule "3rdparty/vgui_support"]
+	path = 3rdparty/vgui_support
+	url = https://github.com/FWGS/vgui_support
+[submodule "3rdparty/opus/opus"]
+	path = 3rdparty/opus/opus
+	url = https://github.com/xiph/opus
+[submodule "3rdparty/xash-extras"]
+	path = 3rdparty/xash-extras
+	url = https://github.com/FWGS/xash-extras
