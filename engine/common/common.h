@@ -144,7 +144,7 @@ typedef enum
 
 #define GameState		(&host.game)
 
-#define FORCE_DRAW_VERSION_TIME 5.0f // draw version for 5 seconds
+#define FORCE_DRAW_VERSION_TIME 5.0 // draw version for 5 seconds
 
 #ifdef _DEBUG
 void DBG_AssertFunction( qboolean fExpr, const char* szExpr, const char* szFile, int szLine, const char* szMessage );
@@ -153,16 +153,14 @@ void DBG_AssertFunction( qboolean fExpr, const char* szExpr, const char* szFile,
 #define Assert( f )
 #endif
 
-extern convar_t	*gl_vsync;
-extern convar_t	*scr_loading;
-extern convar_t	*scr_download;
-extern convar_t	*cmd_scripting;
-extern convar_t	*sv_maxclients;
-extern convar_t	*cl_allow_levelshots;
+extern convar_t	gl_vsync;
+extern convar_t	scr_loading;
+extern convar_t	scr_download;
+extern convar_t	cmd_scripting;
+extern convar_t	cl_allow_levelshots;
 extern convar_t	host_developer;
-extern convar_t	*host_limitlocal;
-extern convar_t	*host_framerate;
-extern convar_t	*host_maxfps;
+extern convar_t	host_limitlocal;
+extern convar_t	host_maxfps;
 extern convar_t	sys_timescale;
 extern convar_t	cl_filterstuffcmd;
 extern convar_t	rcon_password;
@@ -360,8 +358,7 @@ typedef struct host_parm_s
 	qboolean		change_game;	// initialize when game is changed
 	qboolean		mouse_visible;	// vgui override cursor control (never change outside Platform_SetCursorType!)
 	qboolean		shutdown_issued;	// engine is shutting down
-	qboolean		force_draw_version;	// used when fraps is loaded
-	float			force_draw_version_time;
+	double			force_draw_version_time;
 	qboolean		apply_game_config;	// when true apply only to game cvars and ignore all other commands
 	qboolean		apply_opengl_config;// when true apply only to opengl cvars and ignore all other commands
 	qboolean		config_executed;	// a bit who indicated was config.cfg already executed e.g. from valve.rc

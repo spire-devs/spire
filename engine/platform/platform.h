@@ -43,13 +43,16 @@ qboolean Sys_DebuggerPresent( void ); // optional, see Sys_DebugBreak
 const char *Android_GetAndroidID( void );
 const char *Android_LoadID( void );
 void Android_SaveID( const char *id );
+void Android_Init( void );
+void *Android_GetNativeObject( const char *name );
+int Android_GetKeyboardHeight( void );
 #endif
 
 #if XASH_WIN32
 void Platform_UpdateStatusLine( void );
-#else 
+#else
 static inline void Platform_UpdateStatusLine( void ) { }
-#endif  
+#endif
 
 #if XASH_NSWITCH
 void NSwitch_Init( void );
@@ -106,11 +109,6 @@ void Platform_SetClipboardText( const char *buffer );
 
 #if !XASH_SDL
 #define SDL_VERSION_ATLEAST( x, y, z ) 0
-#endif
-
-#if XASH_ANDROID
-void Android_ShowMouse( qboolean show );
-void Android_MouseMove( float *x, float *y );
 #endif
 
 /*

@@ -196,7 +196,7 @@ void CL_ParseServerTime( sizebuf_t *msg )
 
 	dt = cl.time - cl.mtime[0];
 
-	if( fabs( dt ) > cl_clockreset->value )	// 0.1 by default
+	if( fabs( dt ) > cl_clockreset.value )	// 0.1 by default
 	{
 		cl.time = cl.mtime[0];
 		cl.timedelta = 0.0f;
@@ -931,10 +931,10 @@ void CL_ParseServerData( sizebuf_t *msg, qboolean legacy )
 		// loading user settings
 		CSCR_LoadDefaultCVars( "user.scr" );
 
-		if( r_decals->value > mp_decals.value )
-			Cvar_SetValue( "r_decals", mp_decals.value );
+		if( r_decals.value > mp_decals.value )
+			Cvar_DirectSet( &r_decals, mp_decals.string );
 	}
-	else Cvar_Reset( "r_decals" );
+	else Cvar_DirectSet( &r_decals, NULL );
 
 	// set the background state
 	if( cls.demoplayback && ( cls.demonum != -1 ))
@@ -974,9 +974,9 @@ void CL_ParseServerData( sizebuf_t *msg, qboolean legacy )
 	else Cvar_Set( "cl_levelshot_name", va( "levelshots/%s_%s", clgame.mapname, refState.wideScreen ? "16x9" : "4x3" ));
 	Cvar_SetValue( "scr_loading", 0.0f ); // reset progress bar
 
-	if(( cl_allow_levelshots->value && !cls.changelevel ) || cl.background )
+	if(( cl_allow_levelshots.value && !cls.changelevel ) || cl.background )
 	{
-		if( !FS_FileExists( va( "%s.bmp", cl_levelshot_name->string ), true ))
+		if( !FS_FileExists( va( "%s.bmp", cl_levelshot_name.string ), true ))
 			Cvar_Set( "cl_levelshot_name", "*black" ); // render a black screen
 		cls.scrshot_request = scrshot_plaque; // request levelshot even if exist (check filetime)
 	}
@@ -1550,7 +1550,7 @@ CL_StartDark
 */
 static void CL_StartDark( void )
 {
-	if( Cvar_VariableValue( "v_dark" ))
+	if( v_dark.value )
 	{
 		screenfade_t		*sf = &clgame.fade;
 		float			fadetime = 5.0f;
@@ -1575,7 +1575,7 @@ static void CL_StartDark( void )
 		sf->fadeReset += cl.time;
 		sf->fadeEnd += sf->fadeReset;
 
-		Cvar_SetValue( "v_dark", 0.0f );
+		Cvar_DirectSet( &v_dark, "0" );
 	}
 }
 
@@ -2153,7 +2153,7 @@ void CL_ParseUserMessage( sizebuf_t *msg, int svc_num )
 	// parse user message into buffer
 	MSG_ReadBytes( msg, pbuf, iSize );
 
-	if( cl_trace_messages->value )
+	if( cl_trace_messages.value )
 	{
 		Con_Reportf( "^3USERMSG %s SIZE %i SVC_NUM %i\n",
 			clgame.msg[i].name, iSize, clgame.msg[i].number );

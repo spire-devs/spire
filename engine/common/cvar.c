@@ -19,7 +19,7 @@ GNU General Public License for more details.
 #include "eiface.h" // ARRAYSIZE
 
 convar_t	*cvar_vars = NULL; // head of list
-convar_t	*cmd_scripting;
+CVAR_DEFINE_AUTO( cmd_scripting, "0", FCVAR_ARCHIVE|FCVAR_PRIVILEGED, "enable simple condition checking and variable operations" );
 
 #ifdef HACKS_RELATED_HLMODS
 typedef struct cvar_filter_quirks_s
@@ -681,18 +681,18 @@ void Cvar_DirectSet( convar_t *var, const char *value )
 {
 	const char	*pszValue;
 
-	if( !var ) return;	// ???
+	if( unlikely( !var )) return;	// ???
 
 	// lookup for registration
-	if( CVAR_CHECK_SENTINEL( var ) || ( var->next == NULL && !FBitSet( var->flags, FCVAR_EXTENDED|FCVAR_ALLOCATED )))
+	if( unlikely( CVAR_CHECK_SENTINEL( var ) || ( var->next == NULL && !FBitSet( var->flags, FCVAR_EXTENDED|FCVAR_ALLOCATED ))))
 	{
 		// need to registering cvar fisrt
 		Cvar_RegisterVariable( var );	// ok, register it
-	}
 
-	// lookup for registration again
-	if( var != Cvar_FindVar( var->name ))
-		return; // how this possible?
+		// lookup for registration again
+		if( var != Cvar_FindVar( var->name ))
+			return; // how this possible?
+	}
 
 	if( FBitSet( var->flags, FCVAR_READ_ONLY ))
 	{
@@ -1240,7 +1240,7 @@ void Cvar_Init( void )
 {
 	cvar_vars = NULL;
 	cvar_active_filter_quirks = NULL;
-	cmd_scripting = Cvar_Get( "cmd_scripting", "0", FCVAR_ARCHIVE|FCVAR_PRIVILEGED, "enable simple condition checking and variable operations" );
+	Cvar_RegisterVariable( &cmd_scripting );
 	Cvar_RegisterVariable( &host_developer ); // early registering for dev
 	Cvar_RegisterVariable( &cl_filterstuffcmd );
 	Cmd_AddRestrictedCommand( "setgl", Cvar_SetGL_f, "change the value of a opengl variable" );	// OBSOLETE

@@ -792,7 +792,7 @@ void SV_QueueChangeLevel( const char *level, const char *landname )
 
 	if( smooth && !FBitSet( flags, MAP_HAS_LANDMARK ))
 	{
-		if( sv_validate_changelevel->value )
+		if( sv_validate_changelevel.value )
 		{
 			// NOTE: we find valid map but specified landmark it's doesn't exist
 			// run simple changelevel like in q1, throw warning
@@ -812,7 +812,7 @@ void SV_QueueChangeLevel( const char *level, const char *landname )
 
 	if( !smooth && !FBitSet( flags, MAP_HAS_SPAWNPOINT ))
 	{
-		if( sv_validate_changelevel->value )
+		if( sv_validate_changelevel.value )
 		{
 			Con_Printf( S_ERROR "changelevel: %s doesn't have a valid spawnpoint. Ignored.\n", mapname );
 			return;
@@ -822,7 +822,7 @@ void SV_QueueChangeLevel( const char *level, const char *landname )
 	// bad changelevel position invoke enables in one-way transition
 	if( sv.framecount < 15 )
 	{
-		if( sv_validate_changelevel->value )
+		if( sv_validate_changelevel.value )
 		{
 			Con_Printf( S_WARN "an infinite changelevel was detected and will be disabled until a next save\\restore\n" );
 			return; // lock with svs.spawncount here
@@ -2838,60 +2838,11 @@ pfnWriteString
 */
 void GAME_EXPORT pfnWriteString( const char *src )
 {
-	static char	string[MAX_USERMSG_LENGTH];
-	int		len = Q_strlen( src ) + 1;
-	int		rem = sizeof( string ) - 1;
-	char		*dst;
-
-	if( len == 1 )
-	{
-		MSG_WriteChar( &sv.multicast, 0 );
-		svgame.msg_realsize += 1;
-		return; // fast exit
-	}
-
-	// prepare string to sending
-	dst = string;
-
-	while( 1 )
-	{
-		// some escaped chars parsed as two symbols - merge it here
-		if( src[0] == '\\' && src[1] == 'n' )
-		{
-			*dst++ = '\n';
-			src += 2;
-			len -= 1;
-		}
-		else if( src[0] == '\\' && src[1] == 'r' )
-		{
-			*dst++ = '\r';
-			src += 2;
-			len -= 1;
-		}
-		else if( src[0] == '\\' && src[1] == 't' )
-		{
-			*dst++ = '\t';
-			src += 2;
-			len -= 1;
-		}
-		else if(( *dst++ = *src++ ) == 0 )
-			break;
-
-		if( --rem <= 0 )
-		{
-			Con_Printf( S_ERROR "pfnWriteString: exceeds %i symbols\n", len );
-			*dst = '\0'; // string end (not included in count)
-			len = Q_strlen( string ) + 1;
-			break;
-		}
-	}
-
-	*dst = '\0'; // string end (not included in count)
-	MSG_WriteString( &sv.multicast, string );
-	if( svgame.msg_trace ) Con_Printf( "\t^3%s( %s )\n", __FUNCTION__, string );
+	MSG_WriteString( &sv.multicast, src );
+	if( svgame.msg_trace ) Con_Printf( "\t^3%s( %s )\n", __FUNCTION__, src );
 
 	// NOTE: some messages with constant string length can be marked as known sized
-	svgame.msg_realsize += len;
+	svgame.msg_realsize += Q_strlen( src ) + 1;
 }
 
 /*
@@ -3206,6 +3157,60 @@ void SV_FreeStringPool( void )
 }
 
 /*
+============
+SV_ProcessString
+
+Process newly allocated string
+pass NULL pointer to dst to get required length incl. null terminator
+============
+*/
+static uint SV_ProcessString( char *dst, const char *src )
+{
+	const char *p;
+	uint i = 0;
+
+	p = src;
+
+	while( *p )
+	{
+		if( *p == '\\' )
+		{
+			char replace = 0;
+
+			switch( p[1] )
+			{
+			case 'n': replace = '\n'; break;
+			// GoldSrc doesn't replace these symbols
+			// but old hack in pfnWriteString did
+			case 'r': replace = '\r'; break;
+			case 't': replace = '\t'; break;
+			}
+
+			if( replace )
+			{
+				if( dst )
+					dst[i] = replace;
+				i++;
+				p += 2;
+				continue;
+			}
+		}
+
+		if( dst )
+			dst[i] = *p;
+		i++;
+		p++;
+	}
+
+	// null terminator
+	if( dst )
+		dst[i] = '\0';
+	i++;
+
+	return i;
+}
+
+/*
 =============
 SV_AllocString
 
@@ -3217,7 +3222,8 @@ use -str64dup to disable deduplication, -str64alloc to set array size
 */
 string_t GAME_EXPORT SV_AllocString( const char *szValue )
 {
-	const char *newString = NULL;
+	char *newString = NULL;
+	uint len;
 	int cmp;
 
 	if( svgame.physFuncs.pfnAllocString != NULL )
@@ -3227,15 +3233,17 @@ string_t GAME_EXPORT SV_AllocString( const char *szValue )
 	cmp = 1;
 
 	if( !str64.allowdup )
+	{
 		for( newString = str64.poldstringbase + 1;
 			newString < str64.plast && ( cmp = Q_strcmp( newString, szValue ) );
 			newString += Q_strlen( newString ) + 1 );
+	}
 
 	if( cmp )
 	{
-		uint len = Q_strlen( szValue );
+		uint len = SV_ProcessString( NULL, szValue );
 
-		if( str64.plast - str64.poldstringbase + len + 2 > str64.maxstringarray )
+		if( str64.plast - str64.poldstringbase + len + 1 > str64.maxstringarray )
 		{
 			str64.plast = str64.pstringbase + 1;
 			str64.poldstringbase = str64.pstringbase;
@@ -3243,22 +3251,27 @@ string_t GAME_EXPORT SV_AllocString( const char *szValue )
 		}
 
 		//MsgDev( D_NOTE, "SV_AllocString: %ld %s\n", str64.plast - svgame.globals->pStringBase, szValue );
-		memcpy( str64.plast, szValue, len + 1 );
-		str64.totalalloc += len + 1;
+		SV_ProcessString( str64.plast, szValue );
+		str64.totalalloc += len;
 
 		newString = str64.plast;
-		str64.plast += len + 1;
+		str64.plast += len;
 	}
 	else
+	{
 		str64.numdups++;
 		//MsgDev( D_NOTE, "SV_AllocString: dup %ld %s\n", newString - svgame.globals->pStringBase, szValue );
+	}
 
 	if( newString - str64.pstringarray > str64.maxalloc )
 		str64.maxalloc = newString - str64.pstringarray;
 
 	return newString - svgame.globals->pStringBase;
 #else
-	newString = _copystring( svgame.stringspool, szValue, __FILE__, __LINE__ );
+	len = SV_ProcessString( NULL, szValue );
+	newString = Mem_Malloc( svgame.stringspool, len );
+	SV_ProcessString( newString, szValue );
+
 	return newString - svgame.globals->pStringBase;
 #endif
 }
@@ -4187,7 +4200,7 @@ byte *pfnSetFatPVS( const float *org )
 {
 	qboolean	fullvis = false;
 
-	if( !sv.worldmodel->visdata || sv_novis->value || !org || CL_DisableVisibility( ))
+	if( !sv.worldmodel->visdata || sv_novis.value || !org || CL_DisableVisibility( ))
 		fullvis = true;
 
 	// portals can't change viewpoint!
@@ -4237,7 +4250,7 @@ byte *pfnSetFatPAS( const float *org )
 {
 	qboolean	fullvis = false;
 
-	if( !sv.worldmodel->visdata || sv_novis->value || !org || CL_DisableVisibility( ))
+	if( !sv.worldmodel->visdata || sv_novis.value || !org || CL_DisableVisibility( ))
 		fullvis = true;
 
 	// portals can't change viewpoint!

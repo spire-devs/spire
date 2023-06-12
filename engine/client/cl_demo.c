@@ -372,7 +372,7 @@ void CL_WriteDemoHeader( const char *name )
 	demo.header.id = IDEMOHEADER;
 	demo.header.dem_protocol = DEMO_PROTOCOL;
 	demo.header.net_protocol = cls.legacymode ? PROTOCOL_LEGACY_VERSION : PROTOCOL_VERSION;
-	demo.header.host_fps = bound( MIN_FPS, host_maxfps->value, MAX_FPS );
+	demo.header.host_fps = bound( MIN_FPS, host_maxfps.value, MAX_FPS );
 	Q_strncpy( demo.header.mapname, clgame.mapname, sizeof( demo.header.mapname ));
 	Q_strncpy( demo.header.comment, clgame.maptitle, sizeof( demo.header.comment ));
 	Q_strncpy( demo.header.gamedir, FS_Gamedir(), sizeof( demo.header.gamedir ));
@@ -698,7 +698,7 @@ void CL_DemoAborted( void )
 	cls.demofile = NULL;
 	cls.demonum = -1;
 
-	Cvar_SetValue( "v_dark", 0.0f );
+	Cvar_DirectSet( &v_dark, "0" );
 }
 
 /*
@@ -716,7 +716,7 @@ void CL_DemoCompleted( void )
 	if( !CL_NextDemo() && !cls.changedemo )
 		UI_SetActiveMenu( true );
 
-	Cvar_SetValue( "v_dark", 0.0f );
+	Cvar_DirectSet( &v_dark, "0" );
 }
 
 /*
@@ -1306,7 +1306,7 @@ void CL_CheckStartupDemos( void )
 	}
 
 	// run demos loop in background mode
-	Cvar_SetValue( "v_dark", 1.0f );
+	Cvar_DirectSet( &v_dark, "1" );
 	cls.demos_pending = false;
 	cls.demonum = 0;
 	CL_NextDemo ();
@@ -1468,7 +1468,7 @@ void CL_PlayDemo_f( void )
 	{
 		int	c, neg = false;
 
-		demo.header.host_fps = host_maxfps->value;
+		demo.header.host_fps = host_maxfps.value;
 
 		while(( c = FS_Getc( cls.demofile )) != '\n' )
 		{

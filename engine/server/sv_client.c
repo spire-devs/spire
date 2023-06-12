@@ -548,6 +548,51 @@ edict_t *SV_FakeConnect( const char *netname )
 }
 
 /*
+==================
+SV_Kick_f
+
+Kick a user off of the server
+==================
+*/
+void SV_KickPlayer( sv_client_t *cl, const char *fmt, ... )
+{
+	const char *clientId;
+	va_list va;
+	char buf[MAX_VA_STRING];
+
+	if( NET_IsLocalAddress( cl->netchan.remote_address ))
+	{
+		Con_Printf( "The local player cannot be kicked!\n" );
+		return;
+	}
+
+	clientId = SV_GetClientIDString( cl );
+
+	va_start( va, fmt );
+	Q_vsnprintf( buf, sizeof( buf ), fmt, va );
+	va_end( va );
+
+	if( buf[0] )
+	{
+		Log_Printf( "Kick: \"%s<%i><%s><>\" was kicked by \"Console\" (message \"%s\")\n", cl->name, cl->userid, clientId, buf );
+		SV_BroadcastPrintf( cl, "%s was kicked with message: \"%s\"\n", cl->name, buf );
+		SV_ClientPrintf( cl, "You were kicked from the game with message: \"%s\"\n", buf );
+		if( cl->useragent[0] )
+			Netchan_OutOfBandPrint( NS_SERVER, cl->netchan.remote_address, "errormsg\nKicked with message:\n%s\n", buf );
+	}
+	else
+	{
+		Log_Printf( "Kick: \"%s<%i><%s><>\" was kicked by \"Console\"\n", cl->name, cl->userid, clientId );
+		SV_BroadcastPrintf( cl, "%s was kicked\n", cl->name );
+		SV_ClientPrintf( cl, "You were kicked from the game\n" );
+		if( cl->useragent[0] )
+			Netchan_OutOfBandPrint( NS_SERVER, cl->netchan.remote_address, "errormsg\nYou were kicked from the game\n" );
+	}
+
+	SV_DropClient( cl, false );
+}
+
+/*
 =====================
 SV_DropClient
 
@@ -1717,7 +1762,7 @@ static qboolean SV_Pause_f( sv_client_t *cl )
 	if( UI_CreditsActive( ))
 		return true;
 
-	if( !sv_pausable->value )
+	if( !sv_pausable.value )
 	{
 		SV_ClientPrintf( cl, "Pause not allowed.\n" );
 		return true;
@@ -3018,64 +3063,6 @@ void SV_ExecuteClientCommand( sv_client_t *cl, const char *s )
 }
 
 /*
-==================
-SV_TSourceEngineQuery
-==================
-*/
-void SV_TSourceEngineQuery( netadr_t from )
-{
-	// A2S_INFO
-	char	answer[1024] = "";
-	int	count, bots;
-	int	index;
-	sizebuf_t	buf;
-
-	SV_GetPlayerCount( &count, &bots );
-
-	MSG_Init( &buf, "TSourceEngineQuery", answer, sizeof( answer ));
-
-	MSG_WriteLong( &buf, -1 ); // Mark as connectionless
-	MSG_WriteByte( &buf, 'm' );
-	MSG_WriteString( &buf, NET_AdrToString( net_local ));
-	MSG_WriteString( &buf, hostname.string );
-	MSG_WriteString( &buf, sv.name );
-	MSG_WriteString( &buf, GI->gamefolder );
-	MSG_WriteString( &buf, GI->title );
-	MSG_WriteByte( &buf, count );
-	MSG_WriteByte( &buf, svs.maxclients );
-	MSG_WriteByte( &buf, PROTOCOL_VERSION );
-	MSG_WriteByte( &buf, Host_IsDedicated() ? 'D' : 'L' );
-#if defined(_WIN32)
-	MSG_WriteByte( &buf, 'W' );
-#else
-	MSG_WriteByte( &buf, 'L' );
-#endif
-	if( Q_stricmp( GI->gamefolder, "valve" ))
-	{
-		MSG_WriteByte( &buf, 1 ); // mod
-		MSG_WriteString( &buf, GI->game_url );
-		MSG_WriteString( &buf, GI->update_url );
-		MSG_WriteByte( &buf, 0 );
-		MSG_WriteLong( &buf, (int)GI->version );
-		MSG_WriteLong( &buf, GI->size );
-
-		if( GI->gamemode == 2 )
-			MSG_WriteByte( &buf, 1 ); // multiplayer_only
-		else MSG_WriteByte( &buf, 0 );
-
-		if( Q_strstr( GI->game_dll, "hl." ))
-			MSG_WriteByte( &buf, 0 ); // Half-Life DLL
-		else MSG_WriteByte( &buf, 1 ); // Own DLL
-	}
-	else MSG_WriteByte( &buf, 0 ); // Half-Life
-
-	MSG_WriteByte( &buf, GI->secure ); // unsecure
-	MSG_WriteByte( &buf, bots );
-
-	NET_SendPacket( NS_SERVER, MSG_GetNumBytesWritten( &buf ), MSG_GetData( &buf ), from );
-}
-
-/*
 =================
 SV_ConnectionlessPacket
 
@@ -3114,8 +3101,8 @@ void SV_ConnectionlessPacket( netadr_t from, sizebuf_t *msg )
 	else if( !Q_strcmp( pcmd, "rcon" )) SV_RemoteCommand( from, msg );
 	else if( !Q_strcmp( pcmd, "netinfo" )) SV_BuildNetAnswer( from );
 	else if( !Q_strcmp( pcmd, "s" )) SV_AddToMaster( from, msg );
-	else if( !Q_strcmp( pcmd, "T" "Source" )) SV_TSourceEngineQuery( from );
 	else if( !Q_strcmp( pcmd, "i" )) NET_SendPacket( NS_SERVER, 5, "\xFF\xFF\xFF\xFFj", from ); // A2A_PING
+	else if( SV_SourceQuery_HandleConnnectionlessPacket( pcmd, from )) { } // function handles replies
 	else if( !Q_strcmp( pcmd, "c" ) && sv_nat.value && NET_IsMasterAdr( from ))
 	{
 		netadr_t to;

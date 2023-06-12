@@ -258,6 +258,9 @@ typedef struct sv_client_s
 	int		userid;			// identifying number on server
 	int		extensions;
 	char		useragent[MAX_INFO_STRING];
+
+	int ignorecmdtime_warns; // how many times client time was faster than server during this session
+	qboolean ignorecmdtime_warned; // did we warn our server operator in the log for this batch of commands?
 } sv_client_t;
 
 /*
@@ -443,20 +446,22 @@ extern convar_t		coop;
 extern convar_t		sv_cheats;
 extern convar_t		public_server;
 extern convar_t		sv_nat;
-
-extern	convar_t		*sv_pausable;		// allows pause in multiplayer
-extern	convar_t		*sv_check_errors;
-extern	convar_t		*sv_reconnect_limit;
-extern	convar_t		*sv_lighting_modulate;
-extern	convar_t		*sv_novis;
-extern	convar_t		*sv_hostmap;
-extern	convar_t		*sv_validate_changelevel;
+extern convar_t		sv_speedhack_kick;
+extern convar_t		sv_pausable;		// allows pause in multiplayer
+extern convar_t		sv_check_errors;
+extern convar_t		sv_reconnect_limit;
+extern convar_t		sv_lighting_modulate;
+extern convar_t		sv_novis;
+extern convar_t		sv_hostmap;
+extern convar_t		sv_validate_changelevel;
+extern convar_t		sv_maxclients;
 
 //===========================================================
 //
 // sv_main.c
 //
 void SV_FinalMessage( const char *message, qboolean reconnect );
+void SV_KickPlayer( sv_client_t *cl, const char *fmt, ... ) _format( 2 );
 void SV_DropClient( sv_client_t *cl, qboolean crash );
 void SV_UpdateMovevars( qboolean initialize );
 int SV_ModelIndex( const char *name );
@@ -695,5 +700,10 @@ void SV_RunLightStyles( void );
 void SV_SetLightStyle( int style, const char* s, float f );
 const char *SV_GetLightStyle( int style );
 int SV_LightForEntity( edict_t *pEdict );
+
+//
+// sv_query.c
+//
+qboolean SV_SourceQuery_HandleConnnectionlessPacket( const char *c, netadr_t from );
 
 #endif//SERVER_H
