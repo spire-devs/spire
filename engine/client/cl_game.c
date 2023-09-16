@@ -1088,13 +1088,13 @@ void CL_ClearWorld( void )
 	clgame.numStatics = 0;
 }
 
-void CL_InitEdicts( void )
+void CL_InitEdicts( int maxclients )
 {
 	Assert( clgame.entities == NULL );
 
 	if( !clgame.mempool ) return; // Host_Error without client
 #if XASH_LOW_MEMORY != 2
-	CL_UPDATE_BACKUP = ( cl.maxclients <= 1 ) ? SINGLEPLAYER_BACKUP : MULTIPLAYER_BACKUP;
+	CL_UPDATE_BACKUP = ( maxclients <= 1 ) ? SINGLEPLAYER_BACKUP : MULTIPLAYER_BACKUP;
 #endif
 	cls.num_client_entities = CL_UPDATE_BACKUP * NUM_PACKET_ENTITIES;
 	cls.packet_entities = Mem_Realloc( clgame.mempool, cls.packet_entities, sizeof( entity_state_t ) * cls.num_client_entities );
@@ -1140,7 +1140,7 @@ void CL_ClearEdicts( void )
 
 	// in case we stopped with error
 	clgame.maxEntities = 2;
-	CL_InitEdicts();
+	CL_InitEdicts( cl.maxclients );
 }
 
 /*
@@ -1683,6 +1683,22 @@ static void GAME_EXPORT pfnSetCrosshair( HSPRITE hspr, wrect_t rc, int r, int g,
 	clgame.ds.rgbaCrosshair[3] = (byte)0xFF;
 	clgame.ds.pCrosshair = CL_GetSpritePointer( hspr );
 	clgame.ds.rcCrosshair = rc;
+}
+
+
+/*
+=============
+pfnCvar_RegisterVariable
+
+=============
+*/
+static cvar_t *GAME_EXPORT pfnCvar_RegisterClientVariable( const char *szName, const char *szValue, int flags )
+{
+	// a1ba: try to mitigate outdated client.dll vulnerabilities
+	if( !Q_stricmp( szName, "motdfile" ))
+		flags |= FCVAR_PRIVILEGED;
+
+	return (cvar_t *)Cvar_Get( szName, szValue, flags|FCVAR_CLIENTDLL, Cvar_BuildAutoDescription( szName, flags|FCVAR_CLIENTDLL ));
 }
 
 /*
@@ -4038,7 +4054,7 @@ qboolean CL_LoadProgs( const char *name )
 	if( !Mobile_Init() ) // Xash3D FWGS extension: mobile interface
 		Con_Reportf( S_WARN "CL_LoadProgs: couldn't get mobility API\n" );
 
-	CL_InitEdicts ();		// initailize local player and world
+	CL_InitEdicts( cl.maxclients );		// initailize local player and world
 	CL_InitClientMove();	// initialize pm_shared
 
 	// initialize game

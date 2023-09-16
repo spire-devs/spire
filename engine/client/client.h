@@ -688,6 +688,7 @@ extern convar_t	cl_bmodelinterp;
 extern convar_t	cl_lw;		// local weapons
 extern convar_t	cl_charset;
 extern convar_t	cl_trace_messages;
+extern convar_t	cl_trace_events;
 extern convar_t	hud_utf8;
 extern convar_t	cl_showevents;
 extern convar_t	scr_centertime;
@@ -830,7 +831,7 @@ void CL_LinkUserMessage( char *pszName, const int svc_num, int iSize );
 void CL_ParseFinaleCutscene( sizebuf_t *msg, int level );
 void CL_ParseTextMessage( sizebuf_t *msg );
 void CL_DrawHUD( int state );
-void CL_InitEdicts( void );
+void CL_InitEdicts( int maxclients );
 void CL_FreeEdicts( void );
 void CL_ClearWorld( void );
 void CL_DrawCenterPrint( void );
@@ -838,7 +839,6 @@ void CL_ClearSpriteTextures( void );
 void CL_CenterPrint( const char *text, float y );
 void CL_TextMessageParse( byte *pMemFile, int fileSize );
 client_textmessage_t *CL_TextMessageGet( const char *pName );
-int pfnDecalIndexFromName( const char *szDecalName );
 model_t *CL_ModelHandle( int modelindex );
 void NetAPI_CancelAllRequests( void );
 cl_entity_t *CL_GetLocalPlayer( void );
@@ -879,16 +879,44 @@ _inline cl_entity_t *CL_EDICT_NUM( int n )
 //
 // cl_parse.c
 //
+void CL_ParseSetAngle( sizebuf_t *msg );
+void CL_ParseServerData( sizebuf_t *msg, qboolean legacy );
+void CL_ParseLightStyle( sizebuf_t *msg );
+void CL_UpdateUserinfo( sizebuf_t *msg, qboolean legacy );
+void CL_ParseResource( sizebuf_t *msg );
+void CL_ParseClientData( sizebuf_t *msg );
+void CL_UpdateUserPings( sizebuf_t *msg );
+void CL_ParseParticles( sizebuf_t *msg );
+void CL_ParseRestoreSoundPacket( sizebuf_t *msg );
+void CL_ParseBaseline( sizebuf_t *msg, qboolean legacy );
+void CL_ParseSignon( sizebuf_t *msg );
+void CL_ParseRestore( sizebuf_t *msg );
+void CL_ParseStaticDecal( sizebuf_t *msg );
+void CL_ParseAddAngle( sizebuf_t *msg );
+void CL_RegisterUserMessage( sizebuf_t *msg );
+void CL_ParseMovevars( sizebuf_t *msg );
+void CL_ParseResourceRequest( sizebuf_t *msg );
+void CL_ParseCustomization( sizebuf_t *msg );
+void CL_ParseCrosshairAngle( sizebuf_t *msg );
+void CL_ParseSoundFade( sizebuf_t *msg );
+void CL_ParseFileTransferFailed( sizebuf_t *msg );
+void CL_ParseHLTV( sizebuf_t *msg );
+void CL_ParseDirector( sizebuf_t *msg );
+void CL_ParseResLocation( sizebuf_t *msg );
+void CL_ParseCvarValue( sizebuf_t *msg, const qboolean ext );
 void CL_ParseServerMessage( sizebuf_t *msg, qboolean normal_message );
-void CL_ParseLegacyServerMessage( sizebuf_t *msg, qboolean normal_message );
-void CL_LegacyPrecache_f( void );
-
 void CL_ParseTempEntity( sizebuf_t *msg );
 qboolean CL_DispatchUserMessage( const char *pszName, int iSize, void *pbuf );
 qboolean CL_RequestMissingResources( void );
 void CL_RegisterResources ( sizebuf_t *msg );
 void CL_ParseViewEntity( sizebuf_t *msg );
 void CL_ParseServerTime( sizebuf_t *msg );
+
+//
+// cl_parse_48.c
+//
+void CL_ParseLegacyServerMessage( sizebuf_t *msg, qboolean normal_message );
+void CL_LegacyPrecache_f( void );
 
 //
 // cl_scrn.c

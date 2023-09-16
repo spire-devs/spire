@@ -23,7 +23,6 @@ GNU General Public License for more details.
 #include "library.h"
 #include "vid_common.h"
 #include "pm_local.h"
-#include "sequence.h"
 
 #define MAX_TOTAL_CMDS		32
 #define MAX_CMD_BUFFER		8000
@@ -75,6 +74,7 @@ static CVAR_DEFINE_AUTO( cl_upmax, "1200", FCVAR_ARCHIVE, "max allowed incoming 
 CVAR_DEFINE_AUTO( cl_lw, "1", FCVAR_ARCHIVE|FCVAR_USERINFO, "enable client weapon predicting" );
 CVAR_DEFINE_AUTO( cl_charset, "utf-8", FCVAR_ARCHIVE, "1-byte charset to use (iconv style)" );
 CVAR_DEFINE_AUTO( cl_trace_messages, "0", FCVAR_ARCHIVE|FCVAR_CHEAT, "enable message names tracing (good for developers)");
+CVAR_DEFINE_AUTO( cl_trace_events, "0", FCVAR_ARCHIVE|FCVAR_CHEAT, "enable events tracing (good for developers)");
 static CVAR_DEFINE_AUTO( cl_nat, "0", 0, "show servers running under NAT" );
 CVAR_DEFINE_AUTO( hud_utf8, "0", FCVAR_ARCHIVE, "Use utf-8 encoding for hud text" );
 CVAR_DEFINE_AUTO( ui_renderworld, "0", FCVAR_ARCHIVE, "render world when UI is visible" );
@@ -82,10 +82,10 @@ CVAR_DEFINE_AUTO( ui_renderworld, "0", FCVAR_ARCHIVE, "render world when UI is v
 //
 // userinfo
 //
-static CVAR_DEFINE_AUTO( name, "player", FCVAR_USERINFO|FCVAR_ARCHIVE|FCVAR_PRINTABLEONLY, "player name" );
-static CVAR_DEFINE_AUTO( model, "", FCVAR_USERINFO|FCVAR_ARCHIVE, "player model ('player' is a singleplayer model)" );
-static CVAR_DEFINE_AUTO( topcolor, "0", FCVAR_USERINFO|FCVAR_ARCHIVE, "player top color" );
-static CVAR_DEFINE_AUTO( bottomcolor, "0", FCVAR_USERINFO|FCVAR_ARCHIVE, "player bottom color" );
+static CVAR_DEFINE_AUTO( name, "player", FCVAR_USERINFO|FCVAR_ARCHIVE|FCVAR_PRINTABLEONLY|FCVAR_FILTERABLE, "player name" );
+static CVAR_DEFINE_AUTO( model, "", FCVAR_USERINFO|FCVAR_ARCHIVE|FCVAR_FILTERABLE, "player model ('player' is a singleplayer model)" );
+static CVAR_DEFINE_AUTO( topcolor, "0", FCVAR_USERINFO|FCVAR_ARCHIVE|FCVAR_FILTERABLE, "player top color" );
+static CVAR_DEFINE_AUTO( bottomcolor, "0", FCVAR_USERINFO|FCVAR_ARCHIVE|FCVAR_FILTERABLE, "player bottom color" );
 CVAR_DEFINE_AUTO( rate, "3500", FCVAR_USERINFO|FCVAR_ARCHIVE|FCVAR_FILTERABLE, "player network rate" );
 
 client_t		cl;
@@ -232,9 +232,6 @@ void CL_SignonReply( void )
 		if( cl.proxy_redirect && !cls.spectator )
 			CL_Disconnect();
 		cl.proxy_redirect = false;
-
-		if( cls.demoplayback )
-			Sequence_OnLevelLoad( clgame.mapname );
 		break;
 	}
 }
@@ -1558,6 +1555,8 @@ void CL_LocalServers_f( void )
 {
 	netadr_t	adr;
 
+	memset( &adr, 0, sizeof( adr ));
+
 	Con_Printf( "Scanning for servers on the local network area...\n" );
 	NET_Config( true, true ); // allow remote
 
@@ -1590,7 +1589,9 @@ size_t CL_BuildMasterServerScanRequest( char *buf, size_t size, qboolean nat )
 
 	info[0] = 0;
 
+#ifndef XASH_ALL_SERVERS
 	Info_SetValueForKey( info, "gamedir", GI->gamefolder, remaining );
+#endif
 	Info_SetValueForKey( info, "clver", XASH_VERSION, remaining ); // let master know about client version
 	Info_SetValueForKey( info, "nat", nat ? "1" : "0", remaining );
 
@@ -2888,6 +2889,7 @@ void CL_InitLocal( void )
 	Cvar_RegisterVariable( &rcon_address );
 
 	Cvar_RegisterVariable( &cl_trace_messages );
+	Cvar_RegisterVariable( &cl_trace_events );
 
 	// userinfo
 	Cvar_RegisterVariable( &cl_nopred );
@@ -3136,7 +3138,6 @@ void CL_Init( void )
 	VID_Init();	// init video
 	S_Init();	// init sound
 	Voice_Init( VOICE_DEFAULT_CODEC, 3 ); // init voice
-	Sequence_Init();
 
 	// unreliable buffer. unsed for unreliable commands and voice stream
 	MSG_Init( &cls.datagram, "cls.datagram", cls.datagram_buf, sizeof( cls.datagram_buf ));

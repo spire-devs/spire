@@ -140,6 +140,13 @@ static CVAR_DEFINE_AUTO( sv_allow_touch, "1", FCVAR_ARCHIVE, "allow connect with
 static CVAR_DEFINE_AUTO( sv_allow_vr, "1", FCVAR_ARCHIVE, "allow connect from vr version" );
 static CVAR_DEFINE_AUTO( sv_allow_noinputdevices, "1", FCVAR_ARCHIVE, "allow connect from old versions without useragent" );
 
+CVAR_DEFINE_AUTO( sv_userinfo_enable_penalty, "1", FCVAR_ARCHIVE, "enable penalty time for too fast userinfo updates(name, model, etc)" );
+CVAR_DEFINE_AUTO( sv_userinfo_penalty_time, "0.3", FCVAR_ARCHIVE, "initial penalty time" );
+CVAR_DEFINE_AUTO( sv_userinfo_penalty_multiplier, "2", FCVAR_ARCHIVE, "penalty time multiplier" );
+CVAR_DEFINE_AUTO( sv_userinfo_penalty_attempts, "4", FCVAR_ARCHIVE, "if max attempts count was exceeded, penalty time will be increased" );
+CVAR_DEFINE_AUTO( sv_fullupdate_penalty_time, "1", FCVAR_ARCHIVE, "allow fullupdate command only once in this timewindow (set 0 to disable)" );
+CVAR_DEFINE_AUTO( sv_log_outofband, "0", FCVAR_ARCHIVE, "log out of band messages, can be useful for server admins and for engine debugging" );
+
 //============================================================================
 /*
 ================
@@ -618,6 +625,43 @@ qboolean SV_RunGameFrame( void )
 	}
 }
 
+static void SV_UpdateStatusLine( void )
+{
+#if XASH_PLATFORM_HAVE_STATUS
+	static double lasttime;
+	string status;
+
+	if( !Host_IsDedicated( ))
+		return;
+
+	// update only every 1/2 seconds
+	if(( host.realtime - lasttime ) < 0.5f )
+		return;
+
+	if( sv.state == ss_active )
+	{
+		int clients, bots;
+		SV_GetPlayerCount( &clients, &bots );
+
+		Q_snprintf( status, sizeof( status ),
+			"%.1f fps %2i/%2i on %16s",
+			1.f / sv.frametime,
+			clients, svs.maxclients, host.game.levelName );
+	}
+	else if( sv.state == ss_loading )
+		Q_strncpy( status, "Loading level", sizeof( status ));
+	else if( !svs.initialized )
+		Q_strncpy( status, "Server is not loaded", sizeof( status ));
+	// FIXME: unreachable branch
+	// else if( host.status == HOST_SHUTDOWN )
+	//	Q_strncpy( status, "Shutting down...", sizeof( status ));
+	else Q_strncpy( status, "Unknown status", sizeof( status ));
+
+	Platform_SetStatus( status );
+	lasttime = host.realtime;
+#endif // XASH_PLATFORM_HAVE_STATUS
+}
+
 /*
 ==================
 Host_ServerFrame
@@ -626,6 +670,9 @@ Host_ServerFrame
 */
 void Host_ServerFrame( void )
 {
+	// update dedicated server status line in console
+	SV_UpdateStatusLine ();
+
 	// if server is not active, do nothing
 	if( !svs.initialized ) return;
 
@@ -659,9 +706,6 @@ void Host_ServerFrame( void )
 
 	// clear edict flags for next frame
 	SV_PrepWorldFrame ();
-
-	// update dedicated server status line in console
-	Platform_UpdateStatusLine ();
 
 	// send a heartbeat to the master if needed
 	NET_MasterHeartbeat ();
@@ -927,6 +971,13 @@ void SV_Init( void )
 	Cvar_RegisterVariable( &sv_allow_touch );
 	Cvar_RegisterVariable( &sv_allow_vr );
 	Cvar_RegisterVariable( &sv_allow_noinputdevices );
+
+	Cvar_RegisterVariable( &sv_userinfo_enable_penalty );
+	Cvar_RegisterVariable( &sv_userinfo_penalty_time );
+	Cvar_RegisterVariable( &sv_userinfo_penalty_multiplier );
+	Cvar_RegisterVariable( &sv_userinfo_penalty_attempts );
+	Cvar_RegisterVariable( &sv_fullupdate_penalty_time );
+	Cvar_RegisterVariable( &sv_log_outofband );
 
 	// when we in developer-mode automatically turn cheats on
 	if( host_developer.value ) Cvar_SetValue( "sv_cheats", 1.0f );

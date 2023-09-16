@@ -723,7 +723,7 @@ const char *NET_AdrToString( const netadr_t a )
 
 	if( a.type == NA_LOOPBACK )
 		return "loopback";
-	if( a.type6 == NA_IP6 )
+	if( a.type6 == NA_IP6 || a.type6 == NA_MULTICAST_IP6 )
 	{
 		uint8_t ip6[16];
 
@@ -750,7 +750,7 @@ const char *NET_BaseAdrToString( const netadr_t a )
 
 	if( a.type == NA_LOOPBACK )
 		return "loopback";
-	if( a.type6 == NA_IP6 )
+	if( a.type6 == NA_IP6 || a.type6 == NA_MULTICAST_IP6 )
 	{
 		uint8_t ip6[16];
 
@@ -1066,7 +1066,7 @@ net_gai_state_t NET_StringToAdrNB( const char *string, netadr_t *adr )
 	if( !Q_stricmp( string, "localhost" ) || !Q_stricmp( string, "loopback" ))
 	{
 		adr->type = NA_LOOPBACK;
-		return true;
+		return NET_EAI_OK;
 	}
 
 	res = NET_StringToSockaddr( string, &s, true, AF_UNSPEC );
@@ -2111,10 +2111,10 @@ void NET_Init( void )
 	Cvar_RegisterVariable( &net_fakeloss );
 
 	Q_snprintf( cmd, sizeof( cmd ), "%i", PORT_SERVER );
-	Cvar_DirectSet( &net_hostport, cmd );
+	Cvar_FullSet( "hostport", cmd, FCVAR_READ_ONLY );
 
 	Q_snprintf( cmd, sizeof( cmd ), "%i", PORT_CLIENT );
-	Cvar_DirectSet( &net_clientport, cmd );
+	Cvar_FullSet( "clientport", cmd, FCVAR_READ_ONLY );
 
 	// cvar equivalents for IPv6
 	Cvar_RegisterVariable( &net_ip6name );

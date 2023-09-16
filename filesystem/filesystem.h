@@ -43,6 +43,8 @@ enum
 	FS_CUSTOM_PATH    = BIT( 3 ), // gamedir but with custom/mod data
 	FS_GAMERODIR_PATH = BIT( 4 ), // gamedir but read-only
 
+	FS_SKIP_ARCHIVED_WADS = BIT( 5 ), // don't mount wads inside archives automatically
+
 	FS_GAMEDIRONLY_SEARCH_FLAGS = FS_GAMEDIR_PATH | FS_CUSTOM_PATH | FS_GAMERODIR_PATH
 };
 
@@ -100,6 +102,9 @@ typedef struct gameinfo_s
 	char		game_dll_osx[64];	// custom path for game.dll
 
 	qboolean	added;
+
+	int		quicksave_aged_count; // min is 1, max is 99
+	int		autosave_aged_count; // min is 1, max is 99
 } gameinfo_t;
 
 typedef enum
@@ -125,7 +130,6 @@ typedef struct fs_globals_t
 } fs_globals_t;
 
 typedef void (*fs_event_callback_t)( const char *path );
-
 
 typedef struct fs_api_t
 {
@@ -184,7 +188,7 @@ typedef struct fs_api_t
 
 	// reserved
 	void (*Unused0)( void );
-	void (*Unused1)( void );
+	void *(*MountArchive_Fullpath)( const char *path, int flags );
 
 	qboolean (*GetFullDiskPath)( char *buffer, size_t size, const char *name, qboolean gamedironly );
 } fs_api_t;

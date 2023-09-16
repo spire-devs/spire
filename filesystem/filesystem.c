@@ -315,7 +315,7 @@ searchpath_t *FS_AddArchive_Fullpath( const fs_archive_t *archive, const char *f
 	fs_searchpaths = search;
 
 	// time to add in search list all the wads from this archive
-	if( archive->load_wads )
+	if( archive->load_wads && !FBitSet( flags, FS_SKIP_ARCHIVED_WADS ))
 	{
 		stringlist_t list;
 		int i;
@@ -348,7 +348,7 @@ searchpath_t *FS_AddArchive_Fullpath( const fs_archive_t *archive, const char *f
 FS_AddArchive_Fullpath
 ================
 */
-static searchpath_t *FS_AddExtras_Fullpath( const char *file, int flags )
+static searchpath_t *FS_MountArchive_Fullpath( const char *file, int flags )
 {
 	const fs_archive_t *archive;
 	const char *ext = COM_FileExtension( file );
@@ -598,11 +598,18 @@ static void FS_WriteGameInfo( const char *filepath, gameinfo_t *GameInfo )
 	if( GameInfo->noskills )
 		FS_Printf( f, "noskills\t\t\"%i\"\n", GameInfo->nomodels );
 
+#define SAVE_AGED_COUNT 2 // the default count of quick and auto saves
+	if( GameInfo->quicksave_aged_count != SAVE_AGED_COUNT )
+		FS_Printf( f, "quicksave_aged_count\t\t%d\n", GameInfo->quicksave_aged_count );
+
+	if( GameInfo->autosave_aged_count != SAVE_AGED_COUNT )
+		FS_Printf( f, "autosave_aged_count\t\t%d\n", GameInfo->autosave_aged_count );
+#undef SAVE_AGED_COUNT
+
 	// always expose our extensions :)
 	FS_Printf( f, "internal_vgui_support\t\t%s\n", GameInfo->internal_vgui_support ? "1" : "0" );
 	FS_Printf( f, "render_picbutton_text\t\t%s\n", GameInfo->render_picbutton_text ? "1" : "0" );
 
-	FS_Print( f, "\n\n\n" );
 	FS_Close( f );	// all done
 }
 
@@ -707,29 +714,36 @@ void FS_ParseGenericGameInfo( gameinfo_t *GameInfo, const char *buf, const qbool
 		{
 			pfile = COM_ParseFile( pfile, token, sizeof( token ));
 
-			if( !isGameInfo && !Q_stricmp( token, "singleplayer_only" ))
+			if( isGameInfo )
 			{
-				// TODO: Remove this ugly hack too.
-				// This was made because Half-Life has multiplayer,
-				// but for some reason it's marked as singleplayer_only.
-				// Old WON version is fine.
-				if( !Q_stricmp( GameInfo->gamefolder, "valve") )
-					GameInfo->gamemode = GAME_NORMAL;
-				else
-					GameInfo->gamemode = GAME_SINGLEPLAYER_ONLY;
-				Q_strncpy( GameInfo->type, "Single", sizeof( GameInfo->type ));
-			}
-			else if( !isGameInfo && !Q_stricmp( token, "multiplayer_only" ))
-			{
-				GameInfo->gamemode = GAME_MULTIPLAYER_ONLY;
-				Q_strncpy( GameInfo->type, "Multiplayer", sizeof( GameInfo->type ));
+				Q_strncpy( GameInfo->type, token, sizeof( GameInfo->type ));
 			}
 			else
 			{
-				// pass type without changes
-				if( !isGameInfo )
-					GameInfo->gamemode = GAME_NORMAL;
-				Q_strncpy( GameInfo->type, token, sizeof( GameInfo->type ));
+				if( !Q_stricmp( token, "singleplayer_only" ))
+				{
+					// TODO: Remove this ugly hack too.
+					// This was made because Half-Life has multiplayer,
+					// but for some reason it's marked as singleplayer_only.
+					// Old WON version is fine.
+					if( !Q_stricmp( GameInfo->gamefolder, "valve") )
+						GameInfo->gamemode = GAME_NORMAL;
+					else
+						GameInfo->gamemode = GAME_SINGLEPLAYER_ONLY;
+					Q_strncpy( GameInfo->type, "Single", sizeof( GameInfo->type ));
+				}
+				else if( !Q_stricmp( token, "multiplayer_only" ))
+				{
+					GameInfo->gamemode = GAME_MULTIPLAYER_ONLY;
+					Q_strncpy( GameInfo->type, "Multiplayer", sizeof( GameInfo->type ));
+				}
+				else
+				{
+					// pass type without changes
+					if( !isGameInfo )
+						GameInfo->gamemode = GAME_NORMAL;
+					Q_strncpy( GameInfo->type, token, sizeof( GameInfo->type ));
+				}
 			}
 		}
 		// valid for both
@@ -743,11 +757,6 @@ void FS_ParseGenericGameInfo( gameinfo_t *GameInfo, const char *buf, const qbool
 		{
 			pfile = COM_ParseFile( pfile, token, sizeof( token ));
 			GameInfo->size = Q_atoi( token );
-		}
-		else if( !Q_stricmp( token, "edicts" ))
-		{
-			pfile = COM_ParseFile( pfile, token, sizeof( token ));
-			GameInfo->max_edicts = Q_atoi( token );
 		}
 		else if( !Q_stricmp( token, isGameInfo ? "mp_entity" : "mpentity" ))
 		{
@@ -809,7 +818,7 @@ void FS_ParseGenericGameInfo( gameinfo_t *GameInfo, const char *buf, const qbool
 			else if( !Q_stricmp( token, "max_particles" ))
 			{
 				pfile = COM_ParseFile( pfile, token, sizeof( token ));
-				GameInfo->max_particles = bound( 4096, Q_atoi( token ), 32768 );
+				GameInfo->max_particles = bound( 1024, Q_atoi( token ), 131072 );
 			}
 			else if( !Q_stricmp( token, "gamemode" ))
 			{
@@ -846,6 +855,16 @@ void FS_ParseGenericGameInfo( gameinfo_t *GameInfo, const char *buf, const qbool
 			{
 				pfile = COM_ParseFile( pfile, token, sizeof( token ));
 				GameInfo->internal_vgui_support = Q_atoi( token );
+			}
+			else if( !Q_stricmp( token, "quicksave_aged_count" ))
+			{
+				pfile = COM_ParseFile( pfile, token, sizeof( token ));
+				GameInfo->quicksave_aged_count = bound( 2, Q_atoi( token ), 99 );
+			}
+			else if( !Q_stricmp( token, "autosave_aged_count" ))
+			{
+				pfile = COM_ParseFile( pfile, token, sizeof( token ));
+				GameInfo->autosave_aged_count = bound( 2, Q_atoi( token ), 99 );
 			}
 		}
 	}
@@ -1103,8 +1122,10 @@ void FS_AddGameHierarchy( const char *dir, uint flags )
 	// for example, czeror->czero->cstrike->valve
 	for( i = 0; i < FI.numgames; i++ )
 	{
-		if( !Q_strnicmp( FI.games[i]->gamefolder, dir, 64 ))
+		if( !Q_stricmp( FI.games[i]->gamefolder, dir ))
 		{
+			dir = FI.games[i]->gamefolder; // fixup directory case
+
 			Con_Reportf( "FS_AddGameHierarchy: adding recursive basedir %s\n", FI.games[i]->basedir );
 			if( !FI.games[i]->added && Q_stricmp( FI.games[i]->gamefolder, FI.games[i]->basedir ))
 			{
@@ -1157,11 +1178,11 @@ void FS_Rescan( void )
 
 	str = getenv( "XASH3D_EXTRAS_PAK1" );
 	if( COM_CheckString( str ))
-		FS_AddExtras_Fullpath( str, extrasFlags );
+		FS_MountArchive_Fullpath( str, extrasFlags );
 
 	str = getenv( "XASH3D_EXTRAS_PAK2" );
 	if( COM_CheckString( str ))
-		FS_AddExtras_Fullpath( str, extrasFlags );
+		FS_MountArchive_Fullpath( str, extrasFlags );
 
 	if( Q_stricmp( GI->basedir, GI->gamefolder ))
 		FS_AddGameHierarchy( GI->basedir, 0 );
@@ -1240,6 +1261,7 @@ search for library, assume index is valid
 */
 static qboolean FS_FindLibrary( const char *dllname, qboolean directpath, fs_dllinfo_t *dllInfo )
 {
+	string fixedname;
 	searchpath_t	*search;
 	int index, start = 0, i, len;
 
@@ -1255,7 +1277,6 @@ static qboolean FS_FindLibrary( const char *dllname, qboolean directpath, fs_dll
 
 	// replace all backward slashes
 	len = Q_strlen( dllname );
-
 	for( i = 0; i < len; i++ )
 	{
 		if( dllname[i+start] == '\\' ) dllInfo->shortPath[i] = '/';
@@ -1265,16 +1286,22 @@ static qboolean FS_FindLibrary( const char *dllname, qboolean directpath, fs_dll
 
 	COM_DefaultExtension( dllInfo->shortPath, "."OS_LIB_EXT, sizeof( dllInfo->shortPath ));	// apply ext if forget
 
-	search = FS_FindFile( dllInfo->shortPath, &index, NULL, 0, false );
+	search = FS_FindFile( dllInfo->shortPath, &index, fixedname, sizeof( fixedname ), false );
 
-	if( !search && !directpath )
+	if( search )
+	{
+		Q_strncpy( dllInfo->shortPath, fixedname, sizeof( dllInfo->shortPath ));
+	}
+	else if( !directpath )
 	{
 		fs_ext_path = false;
 
 		// trying check also 'bin' folder for indirect paths
-		Q_strncpy( dllInfo->shortPath, dllname, sizeof( dllInfo->shortPath ));
-		search = FS_FindFile( dllInfo->shortPath, &index, NULL, 0, false );
-		if( !search ) return false; // unable to find
+		search = FS_FindFile( dllname, &index, fixedname, sizeof( fixedname ), false );
+		if( !search )
+			return false; // unable to find
+
+		Q_strncpy( dllInfo->shortPath, fixedname, sizeof( dllInfo->shortPath ));
 	}
 
 	dllInfo->encrypted = FS_CheckForCrypt( dllInfo->shortPath );
@@ -1913,7 +1940,7 @@ file_t *FS_Open( const char *filepath, const char *mode, qboolean gamedironly )
 	if( !fs_searchpaths )
 		return NULL;
 
-	// some stupid mappers used leading '/' or '\' in path to models or sounds
+	// some mappers used leading '/' or '\' in path to models or sounds
 	if( filepath[0] == '/' || filepath[0] == '\\' )
 		filepath++;
 
@@ -2029,8 +2056,9 @@ Read up to "buffersize" bytes from a file
 */
 fs_offset_t FS_Read( file_t *file, void *buffer, size_t buffersize )
 {
-	fs_offset_t	count, done;
+	fs_offset_t	done;
 	fs_offset_t	nb;
+	size_t	count;
 
 	// nothing to copy
 	if( buffersize == 0 ) return 1;
@@ -2050,7 +2078,7 @@ fs_offset_t FS_Read( file_t *file, void *buffer, size_t buffersize )
 	{
 		count = file->buff_len - file->buff_ind;
 
-		done += ((fs_offset_t)buffersize > count ) ? count : (fs_offset_t)buffersize;
+		done += ( buffersize > count ) ? (fs_offset_t)count : (fs_offset_t)buffersize;
 		memcpy( buffer, &file->buff[file->buff_ind], done );
 		file->buff_ind += done;
 
@@ -2068,10 +2096,10 @@ fs_offset_t FS_Read( file_t *file, void *buffer, size_t buffersize )
 	// if we have a lot of data to get, put them directly into "buffer"
 	if( buffersize > sizeof( file->buff ) / 2 )
 	{
-		if( count > (fs_offset_t)buffersize )
-			count = (fs_offset_t)buffersize;
+		if( count > buffersize )
+			count = buffersize;
 		lseek( file->handle, file->offset + file->position, SEEK_SET );
-		nb = read (file->handle, &((byte *)buffer)[done], count );
+		nb = read( file->handle, (byte *)buffer + done, count );
 
 		if( nb > 0 )
 		{
@@ -2083,8 +2111,8 @@ fs_offset_t FS_Read( file_t *file, void *buffer, size_t buffersize )
 	}
 	else
 	{
-		if( count > (fs_offset_t)sizeof( file->buff ))
-			count = (fs_offset_t)sizeof( file->buff );
+		if( count > sizeof( file->buff ))
+			count = sizeof( file->buff );
 		lseek( file->handle, file->offset + file->position, SEEK_SET );
 		nb = read( file->handle, file->buff, count );
 
@@ -2336,6 +2364,13 @@ byte *FS_LoadFile( const char *path, fs_offset_t *filesizeptr, qboolean gamediro
 	file_t *file;
 	char netpath[MAX_SYSPATH];
 	int pack_ind;
+
+	// some mappers used leading '/' or '\' in path to models or sounds
+	if( path[0] == '/' || path[0] == '\\' )
+		path++;
+
+	if( path[0] == '/' || path[0] == '\\' )
+		path++;
 
 	if( !fs_searchpaths || FS_CheckNastyPath( path ))
 		return NULL;
@@ -2687,7 +2722,7 @@ qboolean GAME_EXPORT FS_Delete( const char *path )
 		return true;
 
 	ret = remove( real_path );
-	if( ret < 0 )
+	if( ret < 0 && errno != ENOENT )
 	{
 		Con_Printf( "%s: failed to delete file %s (%s): %s\n", __FUNCTION__, real_path, path, strerror( errno ));
 		return false;
@@ -2913,7 +2948,7 @@ fs_api_t g_api =
 	FS_GetDiskPath,
 
 	NULL,
-	NULL,
+	(void *)FS_MountArchive_Fullpath,
 
 	FS_GetFullDiskPath,
 };
