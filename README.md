@@ -27,7 +27,6 @@ Read more about Xash3D on ModDB: https://www.moddb.com/engines/xash3d-engine
 
 ## Planned fork features
 * Higher Mix Rate.
-* Virtual Reality support and game API.
 * Vulkan renderer.
 
 ## Installation & Running
