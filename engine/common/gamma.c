@@ -23,6 +23,7 @@ GNU General Public License for more details.
 static byte	lightgammatable[256];
 static int	lineargammatable[1024];
 static int	screengammatable[1024];
+extern convar_t	gl_overbright;
 
 void BuildGammaTable( float lightgamma, float brightness )
 {
@@ -59,13 +60,26 @@ void BuildGammaTable( float lightgamma, float brightness )
 		lightgammatable[i] = bound( 0, inf, 255 );
 	}
 
+	if ( gl_overbright.value == 2.0 )
+	{
+		overbrightFactor = 0.5;
+	}
+	else if ( gl_overbright.value == 4.0 )
+	{
+		overbrightFactor = 0.25;
+	}
+	else
+	{
+		overbrightFactor = 1.0;
+	}
+
 	for( i = 0; i < 1024; i++ )
 	{
 		// convert from screen gamma space to linear space
-		lineargammatable[i] = 1023 * pow( i / 1023.0f, g1 );
+		lineargammatable[i] = 1023 / overbrightFactor * pow( i / 1023.0f, g1 );
 
 		// convert from linear gamma space to screen space
-		screengammatable[i] = 1023 * pow( i / 1023.0f, 1.0f / g1 );
+		screengammatable[i] = 1023 * overbrightFactor * pow( i / 1023.0f, 1.0f / g1 );
 	}
 }
 
