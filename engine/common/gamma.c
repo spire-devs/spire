@@ -28,7 +28,7 @@ extern convar_t	gl_overbright;
 void BuildGammaTable( float lightgamma, float brightness )
 {
 	int	i, inf;
-	float	f, g, g1, g3;
+	float	f, g, g1, g3, overbrightFactor;
 
 	lightgamma = bound( 1.8f, lightgamma, 3.0f );
 	brightness = bound( 0.0f, brightness, 10.0f );
