@@ -2123,7 +2123,7 @@ static void R_SetLightmap( void )
 	if( mtst.skiptexture )
 		return;
 
-	if( gl_overbright->integer )
+	if( gl_overbright.value )
 	{
 		pglTexEnvi( GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_COMBINE_ARB );
 		pglTexEnvi( GL_TEXTURE_ENV, GL_COMBINE_RGB_ARB, GL_MODULATE );
