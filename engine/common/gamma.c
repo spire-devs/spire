@@ -14,8 +14,11 @@ GNU General Public License for more details.
 */
 
 #include "common.h"
+#include "cvardef.h"
+#include "ref_api.h"
 #include "xash3d_mathlib.h"
 #include "enginefeatures.h"
+#include "common/cvar.h"
 
 //-----------------------------------------------------------------------------
 // Gamma conversion support
