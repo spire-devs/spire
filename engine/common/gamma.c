@@ -16,7 +16,6 @@ GNU General Public License for more details.
 #include "common.h"
 #include "xash3d_mathlib.h"
 #include "enginefeatures.h"
-#include "gl_local.h"
 
 //-----------------------------------------------------------------------------
 // Gamma conversion support
