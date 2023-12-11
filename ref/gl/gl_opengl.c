@@ -858,6 +858,7 @@ void GL_InitCommands( void )
 	gEngfuncs.Cvar_RegisterVariable( &gl_wireframe );
 	gEngfuncs.Cvar_RegisterVariable( &gl_msaa );
 	gEngfuncs.Cvar_RegisterVariable( &gl_stencilbits );
+	gEngfuncs.Cvar_RegisterVariable( &gl_overbright );
 	gEngfuncs.Cvar_RegisterVariable( &gl_round_down );
 
 	// these cvar not used by engine but some mods requires this
