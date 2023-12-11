@@ -391,7 +391,7 @@ typedef struct ref_api_s
 	void (*SW_UnlockBuffer)( void );
 
 	// gamma
-	void (*BuildGammaTable)( float lightgamma, float brightness );
+	void (*BuildGammaTable)( float gamma, float lightgamma, float texgamma, float brightness );
 	byte		(*LightToTexGamma)( byte color );	// software gamma support
 	qboolean	(*R_DoResetGamma)( void );
 

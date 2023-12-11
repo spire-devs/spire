@@ -44,12 +44,12 @@ VID_StartupGamma
 */
 void VID_StartupGamma( void )
 {
-	BuildGammaTable( vid_gamma->value, vid_lightgamma->value, vid_texgamma->value, vid_brightness->value );
-	Con_Reportf( "VID_StartupGamma: gamma %g brightness %g\n", vid_gamma->value, vid_brightness->value );
-	ClearBits( vid_brightness->flags, FCVAR_CHANGED );
-	ClearBits( vid_gamma->flags, FCVAR_CHANGED );
-	ClearBits( vid_texgamma->flags, FCVAR_CHANGED );
-	ClearBits( vid_lightgamma->flags, FCVAR_CHANGED );
+	BuildGammaTable( vid_gamma.value, vid_lightgamma.value, vid_texgamma.value, vid_brightness.value );
+	Con_Reportf( "VID_StartupGamma: gamma %g brightness %g\n", vid_gamma.value, vid_brightness.value );
+	ClearBits( vid_brightness.flags, FCVAR_CHANGED );
+	ClearBits( vid_gamma.flags, FCVAR_CHANGED );
+	ClearBits( vid_texgamma.flags, FCVAR_CHANGED );
+	ClearBits( vid_lightgamma.flags, FCVAR_CHANGED );
 }
 
 
