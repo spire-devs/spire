@@ -22,8 +22,10 @@ GNU General Public License for more details.
 
 static CVAR_DEFINE( window_width, "width", "0", FCVAR_RENDERINFO|FCVAR_VIDRESTART, "screen width" );
 static CVAR_DEFINE( window_height, "height", "0", FCVAR_RENDERINFO|FCVAR_VIDRESTART, "screen height" );
-static CVAR_DEFINE( vid_brightness, "brightness", "0.0", FCVAR_ARCHIVE, "brightness factor" );
 static CVAR_DEFINE( vid_gamma, "gamma", "2.5", FCVAR_ARCHIVE, "gamma amount" );
+static CVAR_DEFINE( vid_texgamma, "texgamma", "1.8", FCVAR_ARCHIVE, "texgamma amount" );
+static CVAR_DEFINE( vid_lightgamma, "lightgamma", "2.5", FCVAR_ARCHIVE, "lightgamma amount" );
+static CVAR_DEFINE( vid_brightness, "brightness", "0.0", FCVAR_ARCHIVE, "brightness factor" );
 static CVAR_DEFINE_AUTO( vid_mode, "0", FCVAR_RENDERINFO, "current video mode index (used only for storage)" );
 static CVAR_DEFINE_AUTO( vid_rotate, "0", FCVAR_RENDERINFO|FCVAR_VIDRESTART, "screen rotation (0-3)" );
 static CVAR_DEFINE_AUTO( vid_scale, "1.0", FCVAR_RENDERINFO|FCVAR_VIDRESTART, "pixel scale" );
@@ -42,11 +44,14 @@ VID_StartupGamma
 */
 void VID_StartupGamma( void )
 {
-	BuildGammaTable( vid_gamma.value, vid_brightness.value );
-	Con_Reportf( "VID_StartupGamma: gamma %g brightness %g\n", vid_gamma.value, vid_brightness.value );
-	ClearBits( vid_brightness.flags, FCVAR_CHANGED );
-	ClearBits( vid_gamma.flags, FCVAR_CHANGED );
+	BuildGammaTable( vid_gamma->value, vid_lightgamma->value, vid_texgamma->value, vid_brightness->value );
+	Con_Reportf( "VID_StartupGamma: gamma %g brightness %g\n", vid_gamma->value, vid_brightness->value );
+	ClearBits( vid_brightness->flags, FCVAR_CHANGED );
+	ClearBits( vid_gamma->flags, FCVAR_CHANGED );
+	ClearBits( vid_texgamma->flags, FCVAR_CHANGED );
+	ClearBits( vid_lightgamma->flags, FCVAR_CHANGED );
 }
+
 
 /*
 =================
@@ -221,8 +226,10 @@ void VID_Init( void )
 	Cvar_RegisterVariable( &vid_rotate );
 	Cvar_RegisterVariable( &vid_scale );
 	Cvar_RegisterVariable( &vid_fullscreen );
-	Cvar_RegisterVariable( &vid_brightness );
 	Cvar_RegisterVariable( &vid_gamma );
+	Cvar_RegisterVariable( &vid_texgamma );
+	Cvar_RegisterVariable( &vid_lightgamma );
+	Cvar_RegisterVariable( &vid_brightness );
 	Cvar_RegisterVariable( &window_xpos );
 	Cvar_RegisterVariable( &window_ypos );
 

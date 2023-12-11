@@ -3511,6 +3511,8 @@ void GL_RebuildLightmaps( void )
 
 	ClearBits( vid_brightness->flags, FCVAR_CHANGED );
 	ClearBits( vid_gamma->flags, FCVAR_CHANGED );
+	ClearBits( vid_texgamma->flags, FCVAR_CHANGED );
+	ClearBits( vid_lightgamma->flags, FCVAR_CHANGED );
 
 	// release old lightmaps
 	for( i = 0; i < MAX_LIGHTMAPS; i++ )
@@ -3631,6 +3633,8 @@ void GL_BuildLightmaps( void )
 	// now gamma and brightness are valid
 	ClearBits( vid_brightness->flags, FCVAR_CHANGED );
 	ClearBits( vid_gamma->flags, FCVAR_CHANGED );
+	ClearBits( vid_texgamma->flags, FCVAR_CHANGED );
+	ClearBits( vid_lightgamma->flags, FCVAR_CHANGED );
 }
 
 void GL_InitRandomTable( void )

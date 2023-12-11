@@ -332,6 +332,60 @@ void Image_SetPalette( const byte *pal, uint *d_table )
 	}
 }
 
+
+
+void Image_SetPaletteCustom( const byte* pal, uint* d_table )
+{
+	byte	rgba[4];
+	int		i;
+
+	// setup palette
+	switch ( image.d_rendermode )
+	{
+	case LUMP_NORMAL:
+		for ( i = 0; i < 256; i++ )
+		{
+			rgba[0] = TextureToGamma(pal[i * 3 + 0]);
+			rgba[1] = TextureToGamma(pal[i * 3 + 1]);
+			rgba[2] = TextureToGamma(pal[i * 3 + 2]);
+			rgba[3] = 0xFF;
+			d_table[i] = *(uint*)rgba;
+		}
+		break;
+	case LUMP_GRADIENT:
+		for ( i = 0; i < 256; i++ )
+		{
+			rgba[0] = TextureToGamma(pal[765]);
+			rgba[1] = TextureToGamma(pal[766]);
+			rgba[2] = TextureToGamma(pal[767]);
+			rgba[3] = i;
+			d_table[i] = *(uint*)rgba;
+		}
+		break;
+	case LUMP_MASKED:
+		for ( i = 0; i < 255; i++ )
+		{
+			rgba[0] = TextureToGamma(pal[i * 3 + 0]);
+			rgba[1] = TextureToGamma(pal[i * 3 + 1]);
+			rgba[2] = TextureToGamma(pal[i * 3 + 2]);
+			rgba[3] = 0xFF;
+			d_table[i] = *(uint*)rgba;
+		}
+		d_table[255] = 0;
+		break;
+	case LUMP_EXTENDED:
+		for ( i = 0; i < 256; i++ )
+		{
+			rgba[0] = pal[i * 4 + 0];
+			rgba[1] = pal[i * 4 + 1];
+			rgba[2] = pal[i * 4 + 2];
+			rgba[3] = pal[i * 4 + 3];
+			d_table[i] = *(uint*)rgba;
+		}
+		break;
+	}
+}
+
 static void Image_ConvertPalTo24bit( rgbdata_t *pic )
 {
 	byte	*pal32, *pal24;
@@ -434,6 +488,33 @@ void Image_GetPaletteLMP( const byte *pal, int rendermode )
 	else
 	{
 		switch( rendermode )
+		{
+		case LUMP_QUAKE1:
+			Image_GetPaletteQ1();
+			break;
+		case LUMP_HALFLIFE:
+			Image_GetPaletteHL();
+			break;
+		default:
+			// defaulting to half-life palette
+			Image_GetPaletteHL();
+			break;
+		}
+	}
+}
+
+void Image_GetPaletteLMPCustom(const byte* pal, int rendermode)
+{
+	image.d_rendermode = rendermode;
+
+	if ( pal )
+	{
+		Image_SetPaletteCustom( pal, d_8to24table );
+		image.d_currentpal = d_8to24table;
+	}
+	else
+	{
+		switch ( rendermode )
 		{
 		case LUMP_QUAKE1:
 			Image_GetPaletteQ1();

@@ -637,6 +637,8 @@ typedef int (*REFAPI)( int version, ref_interface_t *pFunctionTable, ref_api_t* 
 // sometimes it's done to standartize cvars to make it easier for users
 #define ENGINE_SHARED_CVAR_LIST( f ) \
 	ENGINE_SHARED_CVAR_NAME( f, vid_gamma, gamma ) \
+	ENGINE_SHARED_CVAR_NAME( f, vid_texgamma, texgamma ) \
+	ENGINE_SHARED_CVAR_NAME( f, vid_lightgamma, lightgamma ) \
 	ENGINE_SHARED_CVAR_NAME( f, vid_brightness, brightness ) \
 	ENGINE_SHARED_CVAR( f, r_showtextures ) \
 	ENGINE_SHARED_CVAR( f, r_speeds ) \

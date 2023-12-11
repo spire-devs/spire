@@ -1646,23 +1646,27 @@ void GAME_EXPORT R_BeginFrame( qboolean clearScene )
 #if 0 // unused
 	if( R_DoResetGamma( ))
 	{
-		gEngfuncs.BuildGammaTable( 1.8f, 0.0f );
+		gEngfuncs.BuildGammaTable( 2.5f, 2.5f, 1.8f, 0.0f );
 		D_FlushCaches( );
 
 		// next frame will be restored gamma
 		SetBits( vid_brightness->flags, FCVAR_CHANGED );
 		SetBits( vid_gamma->flags, FCVAR_CHANGED );
+		SetBits( vid_texgamma->flags, FCVAR_CHANGED );
+		SetBits( vid_lightgamma->flags, FCVAR_CHANGED );
 	}
 	else
 #endif
-	if( FBitSet( vid_gamma->flags, FCVAR_CHANGED ) || FBitSet( vid_brightness->flags, FCVAR_CHANGED ))
+	if( FBitSet( vid_gamma->flags, FCVAR_CHANGED ) || FBitSet( vid_brightness->flags, FCVAR_CHANGED ) || FBitSet( vid_texgamma->flags, FCVAR_CHANGED ) || FBitSet( vid_lightgamma->flags, FCVAR_CHANGED ) )
 	{
-		gEngfuncs.BuildGammaTable( vid_gamma->value, vid_brightness->value );
+		gEngfuncs.BuildGammaTable( vid_gamma->value, vid_lightgamma->value, vid_texgamma->value, vid_brightness->value );
 
 		D_FlushCaches( );
 		// next frame will be restored gamma
 		ClearBits( vid_brightness->flags, FCVAR_CHANGED );
 		ClearBits( vid_gamma->flags, FCVAR_CHANGED );
+		ClearBits( vid_texgamma->flags, FCVAR_CHANGED );
+		ClearBits( vid_lightgamma->flags, FCVAR_CHANGED );
 	}
 
 	R_Set2DMode( true );

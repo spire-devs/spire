@@ -811,8 +811,9 @@ void S_StopBackgroundTrack( void );
 void S_StopAllSounds( qboolean ambient );
 
 // gamma routines
-void BuildGammaTable( float gamma, float brightness );
+void BuildGammaTable( float gamma, float lightgamma, float texgamma, float brightness );
 byte LightToTexGamma( byte b );
+byte TextureToGamma( byte b );
 
 //
 // identification.c

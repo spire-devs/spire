@@ -992,19 +992,20 @@ void R_CheckGamma( void )
 	if( gEngfuncs.R_DoResetGamma( ))
 	{
 		// paranoia cubemaps uses this
-		gEngfuncs.BuildGammaTable( 1.8f, 0.0f );
+		gEngfuncs.BuildGammaTable( 2.5f, 2.5f, 1.8f, 0.0f );
 
 		// paranoia cubemap rendering
 		if( gEngfuncs.drawFuncs->GL_BuildLightmaps )
 			gEngfuncs.drawFuncs->GL_BuildLightmaps( );
 	}
-	else if( FBitSet( vid_gamma->flags, FCVAR_CHANGED ) || FBitSet( vid_brightness->flags, FCVAR_CHANGED ))
+	else if( FBitSet( vid_gamma->flags, FCVAR_CHANGED ) || FBitSet( vid_brightness->flags, FCVAR_CHANGED ) || FBitSet( vid_texgamma->flags, FCVAR_CHANGED ) || FBitSet( vid_lightgamma->flags, FCVAR_CHANGED ) )
 	{
-		gEngfuncs.BuildGammaTable( vid_gamma->value, vid_brightness->value );
+		gEngfuncs.BuildGammaTable( vid_gamma->value, vid_lightgamma->value, vid_texgamma->value, vid_brightness->value );
 		glConfig.softwareGammaUpdate = true;
 		GL_RebuildLightmaps();
 		glConfig.softwareGammaUpdate = false;
 	}
+
 }
 
 /*
